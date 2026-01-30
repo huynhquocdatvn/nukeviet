@@ -16,7 +16,7 @@
 
 declare(strict_types=1);
 
-namespace NukeViet\Queue;
+namespace NukeViet\Module\queue\worker;
 
 /**
  * LinuxWorker - Fork-based worker for Linux/Unix systems
@@ -51,6 +51,12 @@ class LinuxWorker extends AbstractWorker
             throw new \RuntimeException(
                 'The pcntl extension is required for LinuxWorker. ' .
                 'Please use WindowsWorker on systems without pcntl support.'
+            );
+        }
+
+        if (!extension_loaded('posix')) {
+            throw new \RuntimeException(
+                'The posix extension is required for LinuxWorker.'
             );
         }
 

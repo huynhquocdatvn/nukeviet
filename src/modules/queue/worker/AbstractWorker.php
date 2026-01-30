@@ -14,9 +14,8 @@
 
 declare(strict_types=1);
 
-namespace NukeViet\Queue;
+namespace NukeViet\Module\queue\worker;
 
-use Predis\Client as RedisClient;
 use NukeViet\Core\Database;
 
 /**
@@ -32,8 +31,9 @@ abstract class AbstractWorker
 {
     /**
      * Redis client instance
+     * @var object|null
      */
-    protected ?RedisClient $redis = null;
+    protected $redis = null;
 
     /**
      * Redis configuration from config.php
@@ -81,11 +81,6 @@ abstract class AbstractWorker
     protected bool $shouldRun = true;
 
     /**
-     * Constructor - Initialize Redis connection
-     *
-     * @throws \RuntimeException If Redis configuration is missing
-     */
-    /**
      * Driver type ('redis' or 'database')
      */
     protected string $driver = 'redis';
@@ -106,6 +101,13 @@ abstract class AbstractWorker
                 throw new \RuntimeException(
                     'Redis configuration ($redis_config) is not defined in config.php. ' .
                     'Please add Redis configuration with host, port, password, database, and prefix keys.'
+                );
+            }
+
+            if (!class_exists('\\Predis\\Client')) {
+                throw new \RuntimeException(
+                    'Predis library is not installed. ' .
+                    'Please run "composer require predis/predis" to use Redis driver.'
                 );
             }
 
@@ -145,7 +147,7 @@ abstract class AbstractWorker
                 $options['database'] = (int) $this->redisConfig['database'];
             }
 
-            $this->redis = new RedisClient($options);
+            $this->redis = new \Predis\Client($options);
 
             // Test connection
             $this->redis->ping();

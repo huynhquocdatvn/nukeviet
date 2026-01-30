@@ -31,7 +31,7 @@ define('NV_SYSTEM', true);
  * Since this file is in /src/worker/bootstrap.php,
  * dirname(__DIR__) will return /src/ which is the NukeViet root.
  */
-define('NV_ROOTDIR', dirname(__DIR__));
+define('NV_ROOTDIR', dirname(__DIR__, 3));
 
 /**
  * Simulate $_SERVER variables required by NukeViet core.

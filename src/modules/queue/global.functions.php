@@ -4,7 +4,7 @@
  * NukeViet Queue System - Dispatcher Functions
  *
  * @version 1.0
- * @author AI Assistant
+ * @author Antigravity
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
@@ -163,6 +163,14 @@ function nv_dispatch_job_async(array $job): bool
         trigger_error(
             'nv_dispatch_job: Redis configuration ($redis_config) is not defined. ' .
             'Please add Redis configuration to config.php.',
+            E_USER_WARNING
+        );
+        return false;
+    }
+
+    if (!class_exists('\\Predis\\Client')) {
+        trigger_error(
+            'nv_dispatch_job: Predis library is not installed. Unable to use Redis queue.',
             E_USER_WARNING
         );
         return false;
@@ -365,6 +373,10 @@ function nv_queue_stats(): array
 
     if (!isset($redis_config) || !is_array($redis_config)) {
         return ['error' => 'Redis not configured'];
+    }
+
+    if (!class_exists('\\Predis\\Client')) {
+        return ['error' => 'Predis library not installed'];
     }
 
     try {

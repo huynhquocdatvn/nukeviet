@@ -318,6 +318,10 @@ class Ips
     {
         empty($ip) && $ip = self::$remote_ip;
 
+        if ($ip === 'none') {
+            return false;
+        }
+
         if (preg_match('#^(?:(?:\d{1,2}|1\d\d|2[0-4]\d|25[0-5])\.){3}(?:\d{1,2}|1\d\d|2[0-4]\d|25[0-5])$#', $ip)) {
             $ip2long = ip2long($ip);
         } else {
@@ -327,6 +331,7 @@ class Ips
             $ip = explode(':', $ip);
             $r_ip = '';
             foreach ($ip as $v) {
+                $v = empty($v) ? '0' : $v;
                 $r_ip .= str_pad(base_convert($v, 16, 2), 16, 0, STR_PAD_LEFT);
             }
             $ip2long = base_convert($r_ip, 2, 10);

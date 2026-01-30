@@ -74,8 +74,8 @@ if (isset($options['debug'])) {
  */
 require __DIR__ . '/bootstrap.php';
 
-use NukeViet\Queue\LinuxWorker;
-use NukeViet\Queue\WindowsWorker;
+use NukeViet\Module\queue\worker\LinuxWorker;
+use NukeViet\Module\queue\worker\WindowsWorker;
 
 /**
  * Detect the appropriate worker class based on environment.
@@ -113,7 +113,7 @@ try {
     $workerClass = detectWorkerClass();
     echo "Using worker: {$workerClass}\n\n";
 
-    /** @var \NukeViet\Queue\AbstractWorker $worker */
+    /** @var \NukeViet\Module\queue\worker\AbstractWorker $worker */
     $worker = new $workerClass();
 
     // Apply command line options

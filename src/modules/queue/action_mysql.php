@@ -1,0 +1,51 @@
+<?php
+
+if (!defined('NV_ADMIN') or !defined('NV_MAINFILE')) {
+    exit('Stop!!!');
+}
+
+global $db_config, $module_name;
+
+$sql_create_module = [];
+$sql_drop_module = [];
+
+$tableName = $db_config['prefix'] . '_queue_jobs';
+
+// 1. Create Queue Jobs Table
+$sql_create_module[] = "CREATE TABLE IF NOT EXISTS " . $tableName . " (
+    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+    queue VARCHAR(255) NOT NULL DEFAULT 'default',
+    payload LONGTEXT NOT NULL,
+    attempts TINYINT(3) UNSIGNED NOT NULL DEFAULT 0,
+    reserved_at INT(10) UNSIGNED DEFAULT NULL,
+    available_at INT(10) UNSIGNED NOT NULL,
+    created_at INT(10) UNSIGNED NOT NULL,
+    PRIMARY KEY (id),
+    KEY queue_reserved_available (queue, reserved_at, available_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
+
+// Drop table on uninstall
+$sql_drop_module[] = "DROP TABLE IF EXISTS " . $tableName;
+
+// 2. Register Autoloader Plugin
+// This ensures that modules/queue/hooks/autoloader.php is loaded on every request
+// Hardcode module name to ensure stability
+$plugin_module_name = 'queue'; 
+$plugin_area = 'autoloader';
+$plugin_file = 'autoloader.php';
+$plugin_module_file = 'queue';
+
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_plugins (
+    hook_module, plugin_area, plugin_file, plugin_module_file, plugin_lang, weight, pid
+) VALUES (
+    '" . $plugin_module_name . "',
+    '" . $plugin_area . "',
+    '" . $plugin_file . "',
+    '" . $plugin_module_file . "',
+    'all',
+    1,
+    0
+)";
+
+// Remove plugin on uninstall
+$sql_drop_module[] = "DELETE FROM " . $db_config['prefix'] . "_plugins WHERE hook_module='" . $plugin_module_name . "' AND plugin_area='" . $plugin_area . "'";

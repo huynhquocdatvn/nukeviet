@@ -38,7 +38,6 @@ return array(
     'PHPStan\\PhpDocParser\\' => array($vendorDir . '/phpstan/phpdoc-parser/src'),
     'PHPMailer\\PHPMailer\\' => array($vendorDir . '/phpmailer/phpmailer/src'),
     'NukeViet\\Uapi\\' => array($baseDir . '/uapi'),
-    'NukeViet\\Queue\\' => array($baseDir . '/../worker'),
     'NukeViet\\Module\\' => array($baseDir . '/../modules'),
     'NukeViet\\Api\\' => array($baseDir . '/api'),
     'NukeViet\\' => array($vendorDir . '/vinades/nukeviet'),

@@ -15,7 +15,7 @@
 
 declare(strict_types=1);
 
-namespace NukeViet\Queue;
+namespace NukeViet\Module\queue\worker;
 
 /**
  * WindowsWorker - Loop-based worker for Windows/XAMPP
