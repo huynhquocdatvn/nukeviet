@@ -1,42 +1,42 @@
 <?php
 
 /**
- * NukeViet Queue System - Bootstrap
+ * Hệ thống Queue NukeViet - Bootstrap
  *
  * @version 1.0
  * @author AI Assistant
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
- * CRITICAL: This file initializes the NukeViet environment for CLI worker processes.
- * It must correctly define NV_ROOTDIR so that mainfile.php can locate config.php at the root.
+ * QUAN TRỌNG: Tệp này khởi tạo môi trường NukeViet cho các tiến trình worker CLI.
+ * Nó phải định nghĩa đúng NV_ROOTDIR để mainfile.php có thể định vị config.php tại gốc.
  */
 
 declare(strict_types=1);
 
-// Prevent direct web access - this file is for CLI only
+// Ngăn chặn truy cập web trực tiếp - script này chỉ dành cho CLI
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
-    exit('This script can only be run from the command line.');
+    exit('Script này chỉ có thể được chạy từ dòng lệnh.');
 }
 
 /**
- * NV_SYSTEM constant tells mainfile.php that this is a system-level script.
- * This bypasses the redirect to index.php at the top of mainfile.php.
+ * Hằng số NV_SYSTEM thông báo cho mainfile.php rằng đây là script cấp hệ thống.
+ * Điều này bỏ qua việc chuyển hướng đến index.php ở đầu mainfile.php.
  */
 define('NV_SYSTEM', true);
 
 /**
- * NV_ROOTDIR must point to the parent directory of /worker/
- * Since this file is in /src/worker/bootstrap.php,
- * dirname(__DIR__) will return /src/ which is the NukeViet root.
+ * NV_ROOTDIR phải trỏ đến thư mục cha của /worker/
+ * Vì tệp này nằm trong /src/worker/bootstrap.php,
+ * dirname(__DIR__) sẽ trả về /src/ chính là gốc NukeViet.
  */
 define('NV_ROOTDIR', dirname(__DIR__, 3));
 
 /**
- * Simulate $_SERVER variables required by NukeViet core.
- * These are normally set by the web server but are missing in CLI context.
- * mainfile.php and its dependencies expect these to be present.
+ * Giả lập các biến $_SERVER được yêu cầu bởi NukeViet core.
+ * Những biến này thường được đặt bởi web server nhưng bị thiếu trong ngữ cảnh CLI.
+ * mainfile.php và các phụ thuộc của nó mong đợi chúng tồn tại.
  */
 $_SERVER['SERVER_NAME'] = $_SERVER['SERVER_NAME'] ?? 'localhost';
 $_SERVER['HTTP_HOST'] = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -52,7 +52,7 @@ $_SERVER['DOCUMENT_ROOT'] = $_SERVER['DOCUMENT_ROOT'] ?? NV_ROOTDIR;
 
 /**
  * Include Composer autoloader.
- * This must be loaded before mainfile.php to ensure all classes are available.
+ * Cái này phải được tải trước mainfile.php để đảm bảo tất cả các class đều có sẵn.
  */
 $autoloadPath = NV_ROOTDIR . '/includes/vendor/autoload.php';
 if (!file_exists($autoloadPath)) {
@@ -63,35 +63,35 @@ if (!file_exists($autoloadPath)) {
 require $autoloadPath;
 
 /**
- * PRE-LOAD DATABASE CONFIG
+ * TẢI TRƯỚC CẤU HÌNH DATABASE
  *
- * mainfile.php calls `unset($db_config['dbpass'])` after establishing
- * the initial DB connection for security. However, the worker needs
- * the password to reconnect the database for each job.
+ * mainfile.php gọi `unset($db_config['dbpass'])` sau khi thiết lập
+ * kết nối DB ban đầu vì lý do bảo mật. Tuy nhiên, worker cần
+ * mật khẩu để kết nối lại database cho mỗi công việc.
  *
- * Solution: Pre-load config.php to capture the password, then restore
- * it after mainfile.php runs.
+ * Giải pháp: Tải trước config.php để lấy mật khẩu, sau đó khôi phục
+ * nó sau khi mainfile.php chạy.
  */
 $configPath = NV_ROOTDIR . '/config.php';
 $saved_dbpass = null;
 if (file_exists($configPath)) {
-    // Read config file content
+    // Đọc nội dung file config
     $content = file_get_contents($configPath);
     
-    // Extract dbpass using regex to avoid requiring the file
-    // This prevents NV_MAINFILE conflict and 'Stop!!!' exit
+    // Trích xuất dbpass sử dụng regex để tránh phải require file
+    // Điều này ngăn chặn xung đột NV_MAINFILE và thoát với 'Stop!!!'
     if (preg_match('/\$db_config\[[\'"]dbpass[\'"]\]\s*=\s*[\'"](.*?)[\'"]\s*;/', $content, $matches)) {
         $saved_dbpass = $matches[1];
     }
 }
 
 /**
- * Include the main NukeViet bootstrap file.
- * This will:
- * - Load config.php from NV_ROOTDIR (again, but NV_MAINFILE prevents re-requiring)
- * - Initialize database connection ($db)
- * - Load global configuration ($global_config)
- * - Initialize site modules ($site_mods)
+ * Include file bootstrap chính của NukeViet.
+ * Việc này sẽ:
+ * - Tải config.php từ NV_ROOTDIR (lại một lần nữa, nhưng NV_MAINFILE ngăn chặn việc require lại)
+ * - Khởi tạo kết nối database ($db)
+ * - Tải cấu hình toàn cục ($global_config)
+ * - Khởi tạo các module của site ($site_mods)
  */
 $mainfilePath = NV_ROOTDIR . '/includes/mainfile.php';
 if (!file_exists($mainfilePath)) {
@@ -101,9 +101,9 @@ if (!file_exists($mainfilePath)) {
 require $mainfilePath;
 
 /**
- * RESTORE DATABASE PASSWORD
- * Restore the password that was unset by mainfile.php
- * This allows reconnectDatabase() to work in the worker.
+ * KHÔI PHỤC MẬT KHẨU DATABASE
+ * Khôi phục mật khẩu đã bị unset bởi mainfile.php
+ * Điều này cho phép reconnectDatabase() hoạt động trong worker.
  */
 if ($saved_dbpass !== null) {
     $db_config['dbpass'] = $saved_dbpass;
@@ -111,8 +111,8 @@ if ($saved_dbpass !== null) {
 unset($saved_dbpass);
 
 /**
- * Verify Redis configuration is present.
- * The $redis_config array should be defined in config.php.
+ * Xác minh cấu hình Redis có tồn tại.
+ * Mảng $redis_config nên được định nghĩa trong config.php.
  */
 global $redis_config;
 if (!isset($redis_config) || !is_array($redis_config)) {
@@ -122,7 +122,7 @@ if (!isset($redis_config) || !is_array($redis_config)) {
 }
 
 /**
- * Output success message for debugging purposes.
+ * Xuất thông báo thành công cho mục đích debug.
  */
 if (defined('NV_QUEUE_DEBUG') && NV_QUEUE_DEBUG) {
     fwrite(STDOUT, "NukeViet Queue Bootstrap loaded successfully.\n");

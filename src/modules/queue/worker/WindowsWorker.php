@@ -1,16 +1,16 @@
 <?php
 
 /**
- * NukeViet Queue System - Windows Worker
+ * Hệ thống Queue NukeViet - Worker Windows
  *
  * @version 1.0
  * @author AI Assistant
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
- * This worker uses a simple loop strategy suitable for Windows/XAMPP environments
- * where pcntl_fork is not available. It processes jobs sequentially with
- * configurable limits to prevent memory leaks.
+ * Worker này sử dụng chiến lược vòng lặp đơn giản phù hợp cho môi trường Windows/XAMPP
+ * nơi pcntl_fork không khả dụng. Nó xử lý công việc tuần tự với
+ * giới hạn có thể định cấu hình để ngăn rò rỉ bộ nhớ.
  */
 
 declare(strict_types=1);
@@ -18,26 +18,26 @@ declare(strict_types=1);
 namespace NukeViet\Module\queue\worker;
 
 /**
- * WindowsWorker - Loop-based worker for Windows/XAMPP
+ * WindowsWorker - Worker dựa trên vòng lặp cho Windows/XAMPP
  *
- * Uses a simple loop to process jobs sequentially.
- * Automatically exits after reaching any of these limits:
- * - 50 jobs processed
- * - 1 hour runtime
- * - 100MB memory usage
+ * Sử dụng một vòng lặp đơn giản để xử lý công việc tuần tự.
+ * Tự động thoát sau khi đạt đến bất kỳ giới hạn nào sau đây:
+ * - 50 công việc đã xử lý
+ * - 1 giờ chạy
+ * - 100MB sử dụng bộ nhớ
  *
- * For production use on Windows, use NSSM or Windows Task Scheduler
- * to automatically restart the worker when it exits.
+ * Để sử dụng production trên Windows, hãy sử dụng NSSM hoặc Windows Task Scheduler
+ * để tự động khởi động lại worker khi nó thoát.
  */
 class WindowsWorker extends AbstractWorker
 {
     /**
-     * Number of jobs before forcing garbage collection
+     * Số lượng công việc trước khi buộc thu gom rác
      */
     protected int $gcInterval = 10;
 
     /**
-     * Last garbage collection job count
+     * Số lượng công việc tại lần thu gom rác cuối cùng
      */
     protected int $lastGcAt = 0;
 
@@ -48,16 +48,16 @@ class WindowsWorker extends AbstractWorker
     {
         parent::__construct();
 
-        // Windows-specific settings
-        // Set max execution time to unlimited
+        // Cài đặt cụ thể cho Windows
+        // Đặt thời gian thực thi tối đa thành không giới hạn
         set_time_limit(0);
 
-        // Enable garbage collection
+        // Kích hoạt thu gom rác
         gc_enable();
     }
 
     /**
-     * Force garbage collection if needed
+     * Buộc thu gom rác nếu cần thiết
      */
     protected function maybeGarbageCollect(): void
     {
@@ -77,9 +77,9 @@ class WindowsWorker extends AbstractWorker
     }
 
     /**
-     * Get current memory usage percentage of limit
+     * Lấy phần trăm sử dụng bộ nhớ hiện tại so với giới hạn
      *
-     * @return float Percentage (0-100)
+     * @return float Phần trăm (0-100)
      */
     protected function getMemoryUsagePercent(): float
     {
@@ -87,14 +87,14 @@ class WindowsWorker extends AbstractWorker
     }
 
     /**
-     * Main run loop - simple sequential processing
+     * Vòng lặp chạy chính - xử lý tuần tự đơn giản
      *
-     * Processes jobs one at a time until limits are reached:
-     * 1. Pop job from queue
-     * 2. Process job
-     * 3. Check limits
-     * 4. Garbage collect periodically
-     * 5. Repeat
+     * Xử lý công việc từng cái một cho đến khi đạt giới hạn:
+     * 1. Lấy công việc từ hàng đợi
+     * 2. Xử lý công việc
+     * 3. Kiểm tra giới hạn
+     * 4. Thu gom rác định kỳ
+     * 5. Lặp lại
      */
     public function run(): void
     {
@@ -107,21 +107,21 @@ class WindowsWorker extends AbstractWorker
         $maxEmptyChecks = 60; // Exit if queue is empty for 5 minutes (60 * 5s)
 
         while ($this->shouldContinue()) {
-            // Try to get a job
+        // Thử lấy một công việc
             $job = $this->popJob($this->sleepInterval);
 
             if ($job === null) {
                 $emptyQueueCount++;
 
-                // Log periodic status when queue is empty
-                if ($emptyQueueCount % 12 === 0) { // Every minute
+                // Ghi log trạng thái định kỳ khi hàng đợi trống
+                if ($emptyQueueCount % 12 === 0) { // Mỗi phút
                     $stats = $this->getStats();
                     $this->log("Queue empty. Jobs: {$stats['jobs_processed']}, " .
                         "Runtime: {$stats['runtime_seconds']}s, " .
                         "Memory: {$stats['memory_usage_mb']}MB");
                 }
 
-                // Optional: Exit if queue has been empty for too long
+                // Tùy chọn: Thoát nếu hàng đợi trống quá lâu
                 if ($emptyQueueCount >= $maxEmptyChecks) {
                     $this->log("Queue has been empty for {$maxEmptyChecks} checks, exiting");
                     break;
@@ -130,10 +130,10 @@ class WindowsWorker extends AbstractWorker
                 continue;
             }
 
-            // Reset empty counter when we get a job
+            // Đặt lại bộ đếm trống khi chúng ta nhận được công việc
             $emptyQueueCount = 0;
 
-            // Process the job
+            // Xử lý công việc
             $success = $this->processJob($job);
             $this->jobsProcessed++;
 
@@ -141,10 +141,10 @@ class WindowsWorker extends AbstractWorker
                 $this->log("Job failed, continuing to next job", 'warning');
             }
 
-            // Periodic garbage collection
+            // Thu gom rác định kỳ
             $this->maybeGarbageCollect();
 
-            // Log progress every 10 jobs
+            // Ghi log tiến độ mỗi 10 công việc
             if ($this->jobsProcessed % 10 === 0) {
                 $stats = $this->getStats();
                 $memPercent = round($this->getMemoryUsagePercent(), 1);
@@ -154,15 +154,15 @@ class WindowsWorker extends AbstractWorker
             }
         }
 
-        // Final garbage collection
+        // Thu gom rác cuối cùng
         gc_collect_cycles();
 
-        // Print final statistics
+        // In thống kê cuối cùng
         $stats = $this->getStats();
         $this->log("Worker finished. Processed {$stats['jobs_processed']} jobs in {$stats['runtime_seconds']}s");
         $this->log("Peak memory: {$stats['peak_memory_mb']}MB");
 
-        // Print restart suggestion for Windows
+        // In gợi ý khởi động lại cho Windows
         $this->log("Note: Use NSSM or Windows Task Scheduler to automatically restart this worker.");
     }
 }

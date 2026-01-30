@@ -1,15 +1,15 @@
 <?php
 
 /**
- * NukeViet Queue System - Abstract Worker
+ * Hệ thống Queue NukeViet - Worker trừu tượng
  *
  * @version 1.0
  * @author AI Assistant
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
- * Base class for all worker strategies. Handles Redis connection, database
- * reconnection, and job dispatching logic.
+ * Lớp cơ sở cho tất cả các chiến lược worker. Xử lý kết nối Redis,
+ * kết nối lại cơ sở dữ liệu và logic điều phối công việc.
  */
 
 declare(strict_types=1);
@@ -19,76 +19,76 @@ namespace NukeViet\Module\queue\worker;
 use NukeViet\Core\Database;
 
 /**
- * AbstractWorker - Base class for Queue Workers
+ * AbstractWorker - Lớp cơ sở cho các Queue Worker
  *
- * This class provides common functionality for both LinuxWorker and WindowsWorker:
- * - Redis connection management
- * - Database reconnection before each job (prevents "MySQL has gone away")
- * - Job deserialization and handler invocation
- * - Module validation
+ * Lớp này cung cấp chức năng chung cho cả LinuxWorker và WindowsWorker:
+ * - Quản lý kết nối Redis
+ * - Kết nối lại cơ sở dữ liệu trước mỗi công việc (ngăn lỗi "MySQL has gone away")
+ * - Giải mã công việc và gọi handler
+ * - Xác thực module
  */
 abstract class AbstractWorker
 {
     /**
-     * Redis client instance
+     * Instance Redis client
      * @var object|null
      */
     protected $redis = null;
 
     /**
-     * Redis configuration from config.php
+     * Cấu hình Redis từ config.php
      */
     protected array $redisConfig;
 
     /**
-     * Queue name/key in Redis
+     * Tên hàng đợi/key trong Redis
      */
     protected string $queueName;
 
     /**
-     * Number of jobs processed
+     * Số lượng công việc đã xử lý
      */
     protected int $jobsProcessed = 0;
 
     /**
-     * Worker start time
+     * Thời gian bắt đầu worker
      */
     protected int $startTime;
 
     /**
-     * Maximum memory usage in bytes (100MB)
+     * Bộ nhớ tối đa tính bằng byte (100MB)
      */
     protected int $maxMemory = 104857600;
 
     /**
-     * Maximum runtime in seconds (1 hour)
+     * Thời gian chạy tối đa tính bằng giây (1 giờ)
      */
     protected int $maxRuntime = 3600;
 
     /**
-     * Maximum jobs to process before exit
+     * Số lượng công việc tối đa cần xử lý trước khi thoát
      */
     protected int $maxJobs = 50;
 
     /**
-     * Polling interval in seconds when queue is empty
+     * Khoảng thời gian polling tính bằng giây khi hàng đợi trống
      */
     protected int $sleepInterval = 5;
 
     /**
-     * Whether the worker should continue running
+     * Liệu worker có nên tiếp tục chạy không
      */
     protected bool $shouldRun = true;
 
     /**
-     * Driver type ('redis' or 'database')
+     * Loại driver ('redis' hoặc 'database')
      */
     protected string $driver = 'redis';
 
     /**
-     * Constructor - Initialize Redis connection
+     * Constructor - Khởi tạo kết nối Redis
      *
-     * @throws \RuntimeException If Redis configuration is missing
+     * @throws \RuntimeException Nếu thiếu cấu hình Redis
      */
     public function __construct()
     {
@@ -124,9 +124,9 @@ abstract class AbstractWorker
     }
 
     /**
-     * Connect to Redis server
+     * Kết nối đến máy chủ Redis
      *
-     * @throws \RuntimeException If connection fails
+     * @throws \RuntimeException Nếu kết nối thất bại
      */
     protected function connectRedis(): void
     {
@@ -137,19 +137,19 @@ abstract class AbstractWorker
                 'port' => (int) ($this->redisConfig['port'] ?? 6379),
             ];
 
-            // Add password if configured
+            // Thêm mật khẩu nếu được cấu hình
             if (!empty($this->redisConfig['password'])) {
                 $options['password'] = $this->redisConfig['password'];
             }
 
-            // Add database selection if configured
+            // Thêm lựa chọn database nếu được cấu hình
             if (isset($this->redisConfig['database'])) {
                 $options['database'] = (int) $this->redisConfig['database'];
             }
 
             $this->redis = new \Predis\Client($options);
 
-            // Test connection
+            // Kiểm tra kết nối
             $this->redis->ping();
 
             $this->log("Connected to Redis at {$options['host']}:{$options['port']}");
@@ -161,24 +161,24 @@ abstract class AbstractWorker
     }
 
     /**
-     * Reconnect to database before processing a job.
+     * Kết nối lại cơ sở dữ liệu trước khi xử lý một công việc.
      *
-     * CRITICAL: This method MUST be called before processing any job.
-     * Long-running CLI processes will experience "MySQL has gone away" errors
-     * if the same connection is kept open for extended periods.
+     * QUAN TRỌNG: Phương thức này PHẢI được gọi trước khi xử lý bất kỳ công việc nào.
+     * Các tiến trình CLI chạy lâu sẽ gặp lỗi "MySQL has gone away"
+     * nếu cùng một kết nối được giữ mở trong thời gian dài.
      *
-     * @return Database New database connection instance
+     * @return Database Instance kết nối cơ sở dữ liệu mới
      */
     protected function reconnectDatabase(): Database
     {
         global $db, $db_config;
 
-        // Close existing connection if any
+        // Đóng kết nối hiện tại nếu có
         if ($db instanceof Database) {
             $db = null;
         }
 
-        // Create fresh database connection
+        // Tạo kết nối cơ sở dữ liệu mới
         $db = new Database($db_config);
 
         if (empty($db->connect)) {
@@ -189,21 +189,21 @@ abstract class AbstractWorker
     }
 
     /**
-     * Check if a module is active
+     * Kiểm tra xem một module có hoạt động không
      *
-     * In CLI context, $site_mods may not be fully loaded by mainfile.php.
-     * When $site_mods is not available, we assume the job was validated
-     * at dispatch time and allow it to proceed.
+     * Trong ngữ cảnh CLI, $site_mods có thể không được tải đầy đủ bởi mainfile.php.
+     * Khi $site_mods không khả dụng, chúng ta giả định công việc đã được xác thực
+     * tại thời điểm dispatch và cho phép nó tiếp tục.
      *
-     * @param string $module Module name
-     * @return bool True if module is active or cannot be verified
+     * @param string $module Tên module
+     * @return bool True nếu module hoạt động hoặc không thể xác minh
      */
     protected function isModuleActive(string $module): bool
     {
         global $site_mods;
 
-        // If site_mods is not available (CLI context), assume module is valid
-        // The job was already validated at dispatch time
+        // Nếu site_mods không khả dụng (ngữ cảnh CLI), giả định module hợp lệ
+        // Công việc đã được xác thực tại thời điểm dispatch
         if (!isset($site_mods) || !is_array($site_mods) || empty($site_mods)) {
             $this->log("Note: \$site_mods not available (CLI context), proceeding with job", 'debug');
             return true;
@@ -213,10 +213,10 @@ abstract class AbstractWorker
     }
 
     /**
-     * Pop a job from the queue (Redis or Database)
+     * Lấy một công việc từ hàng đợi (Redis hoặc Database)
      *
-     * @param int $timeout Timeout in seconds for blocking pop (Redis only)
-     * @return array|null Job data or null if no job available
+     * @param int $timeout Thời gian chờ tính bằng giây cho blocking pop (chỉ Redis)
+     * @return array|null Dữ liệu công việc hoặc null nếu không có công việc
      */
     protected function popJob(int $timeout = 5): ?array
     {
@@ -228,19 +228,19 @@ abstract class AbstractWorker
     }
 
     /**
-     * Pop job from Redis
+     * Lấy công việc từ Redis
      */
     protected function popJobFromRedis(int $timeout = 5): ?array
     {
         try {
-            // Use BLPOP for blocking pop with timeout
+            // Sử dụng BLPOP để lấy với timeout (blocking)
             $result = $this->redis->blpop([$this->queueName], $timeout);
 
             if ($result === null) {
                 return null;
             }
 
-            // BLPOP returns [key, value]
+            // BLPOP trả về [key, value]
             $jobData = $result[1] ?? null;
 
             if ($jobData === null) {
@@ -262,7 +262,7 @@ abstract class AbstractWorker
     }
 
     /**
-     * Pop job from Database
+     * Lấy công việc từ Database
      */
     protected function popJobFromDatabase(): ?array
     {
@@ -270,35 +270,35 @@ abstract class AbstractWorker
 
         $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
         
-        // Ensure connection
+        // Đảm bảo kết nối
         if (!is_object($db) || empty($db->connect)) {
             $this->reconnectDatabase();
         }
 
         try {
-            // Use atomic UPDATE to reserve job (simpler than transaction/locking for MySQL)
-            // Works for MyISAM too (though not recommended)
+            // Sử dụng atomic UPDATE để đặt trước công việc (đơn giản hơn transaction/locking cho MySQL)
+            // Hoạt động cho cả MyISAM (mặc dù không khuyến khích)
             
-            // 1. Find a job
-            // Use current timestamps
+            // 1. Tìm một công việc
+            // Sử dụng timestamp hiện tại
             $now = time();
             
-            // We need a way to atomically reserve.
-            // Option 1: Locking Read (SELECT FOR UPDATE) - Requires InnoDB
-            // Option 2: Atomic Update with LIMIT 1 (MySQL specific)
+            // Chúng ta cần một cách để đặt trước một cách nguyên tử (atomic).
+            // Cách 1: Locking Read (SELECT FOR UPDATE) - Yêu cầu InnoDB
+            // Cách 2: Atomic Update với LIMIT 1 (MySQL specific)
             
-            // Let's use Option 2:
+            // Hãy sử dụng Cách 2:
             // UPDATE table SET reserved_at = ?, attempts = attempts + 1 WHERE reserved_at IS NULL ORDER BY id ASC LIMIT 1
-            // But we need to know WHICH job we updated to fetch it.
-            // With pure PDO/MySQL driver in PHP, it's tricky without transaction.
+            // Nhưng chúng ta cần biết công việc NÀO đã được cập nhật để lấy nó.
+            // Với driver PDO/MySQL thuần trong PHP, điều này khó khăn nếu không có transaction.
             
-            // Simplest approach: Transaction
+            // Cách đơn giản nhất: Transaction
             if ($db_config['dbtype'] == 'mysql' || $db_config['dbtype'] == 'mariadb') {
                 $db->query('START TRANSACTION');
                 
                 $sql = "SELECT id, payload, attempts FROM " . $tableName . " WHERE reserved_at IS NULL AND available_at <= " . $now . " ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"; 
-                // SKIP LOCKED is great but requires MySQL 8.0+ / MariaDB 10.6+
-                // Fallback for older versions: simply FOR UPDATE
+                // SKIP LOCKED rất tuyệt nhưng yêu cầu MySQL 8.0+ / MariaDB 10.6+
+                // Fallback cho các phiên bản cũ hơn: đơn giản là FOR UPDATE
                 $result = $db->query(str_replace(' SKIP LOCKED', '', $sql)); 
                 
                 $row = $result->fetch();
@@ -307,19 +307,19 @@ abstract class AbstractWorker
                     $jobId = $row['id'];
                     $payload = $row['payload'];
                     
-                    // Reserve it
+                    // Đặt trước nó
                     $db->query("UPDATE " . $tableName . " SET reserved_at = " . $now . ", attempts = attempts + 1 WHERE id = " . $jobId);
                     
                     $db->query('COMMIT');
                     
                     $job = json_decode($payload, true);
                      if (json_last_error() !== JSON_ERROR_NONE) {
-                        // Mark as failed/deleted?
+                        // Đánh dấu là lỗi/xóa?
                         $db->query("DELETE FROM " . $tableName . " WHERE id = " . $jobId);
                         return null;
                     }
                     
-                    // Add DB ID to job for later deletion
+                    // Thêm DB ID vào công việc để xóa sau này
                     $job['__db_id'] = $jobId;
                     $job['attempts'] = (int) $row['attempts'];
                     
@@ -329,23 +329,23 @@ abstract class AbstractWorker
                 $db->query('COMMIT');
             }
             
-            // If no job found, sleep a bit to avoid CPU spin (polling)
+            // Nếu không tìm thấy công việc, ngủ một chút để tránh CPU quay vòng (polling)
             usleep(1000000); // 1 second
             
             return null;
 
         } catch (\Exception $e) {
             $this->log("Error popping job from database: " . $e->getMessage(), 'error');
-            // Try reconnecting next time
+            // Thử kết nối lại lần sau
             return null;
         }
     }
 
     /**
-     * Process a single job
+     * Xử lý một công việc đơn lẻ
      *
-     * @param array $job Job data containing 'module', 'handler', 'data'
-     * @return bool True if job processed successfully
+     * @param array $job Dữ liệu công việc chứa 'module', 'handler', 'data'
+     * @return bool True nếu công việc được xử lý thành công
      */
     protected function processJob(array $job): bool
     {
@@ -356,19 +356,19 @@ abstract class AbstractWorker
 
         $this->log("Processing job {$jobId}: {$module}::{$handler}");
 
-        // Validate required fields
+        // Xác thực các trường bắt buộc
         if (empty($module) || empty($handler)) {
             $this->log("Invalid job: missing module or handler", 'error');
             return false;
         }
 
-        // Check if module is active
+        // Kiểm tra xem module có hoạt động không
         if (!$this->isModuleActive($module)) {
             $this->log("Module '{$module}' is not active, skipping job", 'warning');
             return false;
         }
 
-        // Reconnect database before processing
+        // Kết nối lại cơ sở dữ liệu trước khi xử lý
         try {
             $this->reconnectDatabase();
         } catch (\Exception $e) {
@@ -376,8 +376,8 @@ abstract class AbstractWorker
             return false;
         }
 
-        // Resolve handler class
-        // Expected format: Jobs\ClassName or full namespace
+        // Giải quyết lớp handler
+        // Định dạng mong đợi: Jobs\ClassName hoặc namespace đầy đủ
         $handlerClass = $this->resolveHandlerClass($module, $handler);
 
         if (!class_exists($handlerClass)) {
@@ -390,7 +390,7 @@ abstract class AbstractWorker
             return false;
         }
 
-        // Execute the job
+        // Thực thi công việc
         try {
             $startTime = microtime(true);
             $result = $handlerClass::handle($data);
@@ -399,7 +399,7 @@ abstract class AbstractWorker
             if ($result) {
                 $this->log("Job {$jobId} completed in {$duration}ms");
                 
-                // If database driver, delete job after completion
+                // Nếu là driver database, xóa công việc sau khi hoàn thành
                 if (isset($job['__db_id'])) {
                     $this->deleteJobFromDatabase($job['__db_id']);
                 }
@@ -424,32 +424,32 @@ abstract class AbstractWorker
     }
 
     /**
-     * Resolve the full class name for a job handler
+     * Giải quyết tên lớp đầy đủ cho một job handler
      *
-     * @param string $module Module name (e.g., 'news')
-     * @param string $handler Handler name (e.g., 'Jobs\SendEmail' or 'SendEmail')
-     * @return string Full class name
+     * @param string $module Tên module (ví dụ: 'news')
+     * @param string $handler Tên handler (ví dụ: 'Jobs\SendEmail' hoặc 'SendEmail')
+     * @return string Tên lớp đầy đủ
      */
     protected function resolveHandlerClass(string $module, string $handler): string
     {
-        // If handler already contains namespace, use as-is
+        // Nếu handler đã chứa namespace, sử dụng nguyên trạng
         if (str_contains($handler, '\\')) {
-            // If it starts with NukeViet, assume it's fully qualified
+            // Nếu nó bắt đầu bằng NukeViet, giả định nó là đầy đủ
             if (str_starts_with($handler, 'NukeViet\\')) {
                 return $handler;
             }
-            // Otherwise, prepend the module namespace
+            // Ngược lại, thêm namespace của module vào trước
             return "NukeViet\\Module\\{$module}\\{$handler}";
         }
 
-        // Default: assume handler is in Jobs namespace of the module
+        // Mặc định: giả định handler nằm trong namespace Jobs của module
         return "NukeViet\\Module\\{$module}\\Jobs\\{$handler}";
     }
 
     /**
-     * Check if worker should continue running
+     * Kiểm tra xem worker có nên tiếp tục chạy không
      *
-     * @return bool True if worker should continue
+     * @return bool True nếu worker nên tiếp tục
      */
     protected function shouldContinue(): bool
     {
@@ -457,20 +457,20 @@ abstract class AbstractWorker
             return false;
         }
 
-        // Check job limit
+        // Kiểm tra giới hạn công việc
         if ($this->jobsProcessed >= $this->maxJobs) {
             $this->log("Reached maximum jobs limit ({$this->maxJobs})");
             return false;
         }
 
-        // Check runtime limit
+        // Kiểm tra giới hạn thời qian chạy
         $runtime = time() - $this->startTime;
         if ($runtime >= $this->maxRuntime) {
             $this->log("Reached maximum runtime limit ({$this->maxRuntime}s)");
             return false;
         }
 
-        // Check memory limit
+        // Kiểm tra giới hạn bộ nhớ
         $memoryUsage = memory_get_usage(true);
         if ($memoryUsage >= $this->maxMemory) {
             $memoryMB = round($memoryUsage / 1048576, 2);
@@ -482,10 +482,10 @@ abstract class AbstractWorker
     }
 
     /**
-     * Log a message to stdout/stderr
+     * Ghi log ra stdout/stderr
      *
-     * @param string $message Message to log
-     * @param string $level Log level (info, warning, error, debug)
+     * @param string $message Thông điệp cần log
+     * @param string $level Mức độ log (info, warning, error, debug)
      */
     protected function log(string $message, string $level = 'info'): void
     {
@@ -501,7 +501,7 @@ abstract class AbstractWorker
     }
 
     /**
-     * Graceful shutdown handler
+     * Handler tắt gracefull
      */
     public function shutdown(): void
     {
@@ -510,9 +510,9 @@ abstract class AbstractWorker
     }
 
     /**
-     * Get statistics about the worker
+     * Lấy thống kê về worker
      *
-     * @return array Worker statistics
+     * @return array Thống kê worker
      */
     public function getStats(): array
     {
@@ -525,25 +525,25 @@ abstract class AbstractWorker
     }
 
     /**
-     * Handle failed job by releasing or deleting
+     * Xử lý công việc thất bại bằng cách release hoặc xóa
      */
     protected function handleFailedJob(array $job): void
     {
         global $db, $db_config;
         
         $id = $job['__db_id'];
-        // Note: attempts is already incremented in popJob when reserving
+        // Lưu ý: attempts đã được tăng trong popJob khi đặt trước
         $attempts = $job['attempts'] ?? 1;
         
-        // Increase attempts for next check (since DB already has attempts+1)
-        // Wait, the DB column 'attempts' stores how many times it has been popped.
-        // If current value is 1, it means this is the first attempt.
-        // If we release it, we want it to be picked up again.
+        // Tăng attempts cho lần kiểm tra tiếp theo (vì DB đã có attempts+1)
+        // Chờ đã, cột 'attempts' trong DB lưu số lần nó đã được pop.
+        // Nếu giá trị hiện tại là 1, nghĩa là đây là lần thử đầu tiên.
+        // Nếu chúng ta release nó, chúng ta muốn nó được lấy lại lần nữa.
         
-        $maxAttempts = 3; // Configurable max attempts
+        $maxAttempts = 3; // Số lần thử tối đa có thể cấu hình
         
         if ($attempts < $maxAttempts) {
-            // Release job back to queue
+            // Release công việc trở lại hàng đợi
             $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
             
             // Delay 30s * attempts
@@ -557,14 +557,14 @@ abstract class AbstractWorker
                 $this->log("Failed to release job {$id}: " . $e->getMessage(), 'error');
             }
         } else {
-            // Max attempts reached - delete job
+            // Đã đạt số lần thử tối đa - xóa công việc
             $this->log("Job {$id} exceeded max attempts ({$maxAttempts}). Deleting job.", 'error');
             $this->deleteJobFromDatabase($id);
         }
     }
 
     /**
-     * Delete job from database (after successful processing)
+     * Xóa công việc khỏi cơ sở dữ liệu (sau khi xử lý thành công)
      */
     protected function deleteJobFromDatabase($id): void
     {
@@ -578,10 +578,10 @@ abstract class AbstractWorker
     }
 
     /**
-     * Main run loop - implemented by child classes
+     * Vòng lặp chạy chính - được triển khai bởi các lớp con
      *
-     * LinuxWorker: Uses pcntl_fork for each job
-     * WindowsWorker: Uses loop with limits
+     * LinuxWorker: Sử dụng pcntl_fork cho mỗi công việc
+     * WindowsWorker: Sử dụng vòng lặp với các giới hạn
      */
     abstract public function run(): void;
 }

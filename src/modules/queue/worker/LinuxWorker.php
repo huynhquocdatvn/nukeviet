@@ -1,17 +1,17 @@
 <?php
 
 /**
- * NukeViet Queue System - Linux Worker
+ * Hệ thống Queue NukeViet - Worker Linux
  *
  * @version 1.0
  * @author AI Assistant
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
- * This worker uses pcntl_fork to create child processes for each job.
- * The parent process manages the queue while children handle individual jobs.
- * This approach provides excellent memory management as each child process
- * is completely freed after processing.
+ * Worker này sử dụng pcntl_fork để tạo tiến trình con cho mỗi công việc.
+ * Tiến trình cha quản lý hàng đợi trong khi các tiến trình con xử lý các công việc riêng lẻ.
+ * Cách tiếp cận này cung cấp khả năng quản lý bộ nhớ tuyệt vời vì mỗi tiến trình con
+ * được giải phóng hoàn toàn sau khi xử lý.
  */
 
 declare(strict_types=1);
@@ -19,23 +19,23 @@ declare(strict_types=1);
 namespace NukeViet\Module\queue\worker;
 
 /**
- * LinuxWorker - Fork-based worker for Linux/Unix systems
+ * LinuxWorker - Worker dựa trên fork cho các hệ thống Linux/Unix
  *
- * Uses pcntl_fork() to spawn child processes for each job.
- * Advantages:
- * - Complete memory isolation between jobs
- * - No memory leaks from long-running processes
- * - Each job gets a fresh environment
+ * Sử dụng pcntl_fork() để spawn tiến trình con cho mỗi công việc.
+ * Ưu điểm:
+ * - Cách ly bộ nhớ hoàn toàn giữa các công việc
+ * - Không rò rỉ bộ nhớ từ các tiến trình chạy lâu
+ * - Mỗi công việc có một môi trường mới
  */
 class LinuxWorker extends AbstractWorker
 {
     /**
-     * Maximum number of concurrent child processes
+     * Số lượng tiến trình con đồng thời tối đa
      */
     protected int $maxChildren = 4;
 
     /**
-     * Currently running child PIDs
+     * Các PID con đang chạy
      *
      * @var array<int, int> [pid => startTime]
      */
@@ -46,7 +46,7 @@ class LinuxWorker extends AbstractWorker
      */
     public function __construct()
     {
-        // Verify pcntl extension is available
+        // Xác minh extension pcntl có sẵn không
         if (!extension_loaded('pcntl')) {
             throw new \RuntimeException(
                 'The pcntl extension is required for LinuxWorker. ' .
@@ -62,16 +62,16 @@ class LinuxWorker extends AbstractWorker
 
         parent::__construct();
 
-        // Setup signal handlers
+        // Thiết lập các signal handler
         $this->setupSignalHandlers();
     }
 
     /**
-     * Setup signal handlers for graceful shutdown
+     * Thiết lập các signal handler để tắt một cách an toàn
      */
     protected function setupSignalHandlers(): void
     {
-        // Handle SIGTERM (kill) and SIGINT (Ctrl+C)
+        // Xử lý SIGTERM (kill) và SIGINT (Ctrl+C)
         pcntl_async_signals(true);
 
         pcntl_signal(SIGTERM, function () {
@@ -84,14 +84,14 @@ class LinuxWorker extends AbstractWorker
             $this->shutdown();
         });
 
-        // Handle child process completion
+        // Xử lý khi tiến trình con hoàn tất
         pcntl_signal(SIGCHLD, function () {
             $this->reapChildren();
         });
     }
 
     /**
-     * Reap completed child processes
+     * Thu dọn các tiến trình con đã hoàn tất
      */
     protected function reapChildren(): void
     {
@@ -118,7 +118,7 @@ class LinuxWorker extends AbstractWorker
     }
 
     /**
-     * Wait for a child slot to become available
+     * Chờ một slot con trống
      */
     protected function waitForChildSlot(): void
     {
@@ -132,17 +132,17 @@ class LinuxWorker extends AbstractWorker
     }
 
     /**
-     * Main run loop using fork
+     * Vòng lặp chạy chính sử dụng fork
      *
-     * The parent process continuously:
-     * 1. Waits for available child slot
-     * 2. Pops a job from Redis
-     * 3. Forks a child to process the job
-     * 4. Parent returns to step 1
+     * Tiến trình cha liên tục:
+     * 1. Chờ slot con trống
+     * 2. Lấy một công việc từ Redis
+     * 3. Fork một con để xử lý công việc
+     * 4. Cha quay lại bước 1
      *
-     * Child process:
-     * 1. Processes the job
-     * 2. Exits immediately (memory freed)
+     * Tiến trình con:
+     * 1. Xử lý công việc
+     * 2. Thoát ngay lập tức (giải phóng bộ nhớ)
      */
     public function run(): void
     {
@@ -152,34 +152,34 @@ class LinuxWorker extends AbstractWorker
             round($this->maxMemory / 1048576) . "MB memory");
 
         while ($this->shouldContinue()) {
-            // Reap any completed children
+            // Thu dọn bất kỳ con nào đã hoàn tất
             $this->reapChildren();
 
-            // Wait for available child slot
+            // Chờ slot con trống
             $this->waitForChildSlot();
 
-            // Check limits again after waiting
+            // Kiểm tra giới hạn lại sau khi chờ
             if (!$this->shouldContinue()) {
                 break;
             }
 
-            // Try to get a job
+            // Thử lấy một công việc
             $job = $this->popJob($this->sleepInterval);
 
             if ($job === null) {
                 continue;
             }
 
-            // Fork a child process to handle this job
+            // Fork một tiến trình con để xử lý công việc này
             $pid = pcntl_fork();
 
             if ($pid === -1) {
-                // Fork failed - process job in parent as fallback
+                // Fork thất bại - xử lý công việc trong cha như dự phòng
                 $this->log("Fork failed, processing job in parent process", 'warning');
                 $this->processJob($job);
                 $this->jobsProcessed++;
             } elseif ($pid === 0) {
-                // Child process
+                // Tiến trình con
                 try {
                     $result = $this->processJob($job);
                     exit($result ? 0 : 1);
@@ -188,14 +188,14 @@ class LinuxWorker extends AbstractWorker
                     exit(1);
                 }
             } else {
-                // Parent process
+                // Tiến trình cha
                 $this->children[$pid] = time();
                 $this->jobsProcessed++;
                 $this->log("Spawned child process {$pid} for job", 'debug');
             }
         }
 
-        // Wait for all children to complete
+        // Chờ tất cả các con hoàn tất
         $this->log("Waiting for remaining child processes to complete...");
         while (!empty($this->children)) {
             $this->reapChildren();
@@ -204,20 +204,20 @@ class LinuxWorker extends AbstractWorker
             }
         }
 
-        // Print final statistics
+        // In thống kê cuối cùng
         $stats = $this->getStats();
         $this->log("Worker finished. Processed {$stats['jobs_processed']} jobs in {$stats['runtime_seconds']}s");
         $this->log("Peak memory: {$stats['peak_memory_mb']}MB");
     }
 
     /**
-     * Override shutdown to also terminate children
+     * Ghi đè shutdown để cũng chấm dứt các con
      */
     public function shutdown(): void
     {
         parent::shutdown();
 
-        // Send SIGTERM to all children
+        // Gửi SIGTERM tới tất cả các con
         foreach (array_keys($this->children) as $pid) {
             $this->log("Sending SIGTERM to child process {$pid}", 'debug');
             posix_kill($pid, SIGTERM);

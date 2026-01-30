@@ -1,33 +1,33 @@
 <?php
 
 /**
- * NukeViet Queue System - CLI Entry Point
+ * Hệ thống Queue NukeViet - Điểm vào CLI
  *
  * @version 1.0
  * @author AI Assistant
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
- * Usage:
+ * Sử dụng:
  *   php worker/run.php [options]
  *
- * Options:
- *   --help          Show this help message
- *   --debug         Enable debug logging
- *   --max-jobs=N    Maximum jobs to process (default: 50)
- *   --max-time=N    Maximum runtime in seconds (default: 3600)
- *   --max-memory=N  Maximum memory in MB (default: 100)
+ * Tùy chọn:
+ *   --help          Hiển thị thông báo trợ giúp này
+ *   --debug         Bật ghi log debug
+ *   --max-jobs=N    Số lượng công việc tối đa cần xử lý (mặc định: 50)
+ *   --max-time=N    Thời gian chạy tối đa tính bằng giây (mặc định: 3600)
+ *   --max-memory=N  Bộ nhớ tối đa tính bằng MB (mặc định: 100)
  */
 
 declare(strict_types=1);
 
-// Ensure running from CLI
+// Đảm bảo chạy từ CLI
 if (PHP_SAPI !== 'cli') {
     http_response_code(403);
-    exit('This script can only be run from the command line.');
+    exit('Kịch bản này chỉ có thể được chạy từ dòng lệnh.');
 }
 
-// Parse command line options
+// Phân tích các tùy chọn dòng lệnh
 $options = getopt('h', [
     'help',
     'debug',
@@ -36,41 +36,41 @@ $options = getopt('h', [
     'max-memory:',
 ]);
 
-// Show help
+// Hiển thị trợ giúp
 if (isset($options['h']) || isset($options['help'])) {
     echo <<<HELP
 NukeViet Queue Worker v1.0
 
-Usage:
+Sử dụng:
   php worker/run.php [options]
 
-Options:
-  -h, --help          Show this help message
-  --debug             Enable debug logging
-  --max-jobs=N        Maximum jobs to process before exit (default: 50)
-  --max-time=N        Maximum runtime in seconds before exit (default: 3600)
-  --max-memory=N      Maximum memory usage in MB before exit (default: 100)
+Tùy chọn:
+  -h, --help          Hiển thị thông báo trợ giúp này
+  --debug             Bật ghi log debug
+  --max-jobs=N        Số lượng công việc tối đa cần xử lý trước khi thoát (mặc định: 50)
+  --max-time=N        Thời gian chạy tối đa tính bằng giây trước khi thoát (mặc định: 3600)
+  --max-memory=N      Sử dụng bộ nhớ tối đa tính bằng MB trước khi thoát (mặc định: 100)
 
-Examples:
+Ví dụ:
   php worker/run.php
   php worker/run.php --max-jobs=100 --max-time=7200
   php worker/run.php --debug
 
-For production Linux deployment, use Supervisor or systemd to manage the worker.
-For Windows/XAMPP, use NSSM or Windows Task Scheduler for auto-restart.
+Để deploy Linux production, hãy sử dụng Supervisor hoặc systemd để quản lý worker.
+Đối với Windows/XAMPP, sử dụng NSSM hoặc Windows Task Scheduler để tự động khởi động lại.
 
 HELP;
     exit(0);
 }
 
-// Enable debug mode
+// Kích hoạt chế độ debug
 if (isset($options['debug'])) {
     define('NV_QUEUE_DEBUG', true);
 }
 
 /**
- * Bootstrap NukeViet environment.
- * This loads config.php, mainfile.php, and initializes $db, $site_mods, etc.
+ * Bootstrap môi trường NukeViet.
+ * Điều này tải config.php, mainfile.php và khởi tạo $db, $site_mods, v.v.
  */
 require __DIR__ . '/bootstrap.php';
 
@@ -78,27 +78,27 @@ use NukeViet\Module\queue\worker\LinuxWorker;
 use NukeViet\Module\queue\worker\WindowsWorker;
 
 /**
- * Detect the appropriate worker class based on environment.
+ * Phát hiện lớp worker phù hợp dựa trên môi trường.
  *
- * - If pcntl extension is available: Use LinuxWorker (fork-based)
- * - Otherwise: Use WindowsWorker (loop-based)
+ * - Nếu extension pcntl có sẵn: Sử dụng LinuxWorker (dựa trên fork)
+ * - Ngược lại: Sử dụng WindowsWorker (dựa trên vòng lặp)
  */
 function detectWorkerClass(): string
 {
-    // Check for pcntl extension (Linux/Unix only)
+    // Kiểm tra extension pcntl (chỉ Linux/Unix)
     if (extension_loaded('pcntl') && function_exists('pcntl_fork')) {
-        // Additional check: Ensure we're on a Unix-like system
+        // Kiểm tra bổ sung: Đảm bảo chúng ta đang ở trên hệ thống giống Unix
         if (DIRECTORY_SEPARATOR === '/') {
             return LinuxWorker::class;
         }
     }
 
-    // Fallback to Windows worker
+    // Dự phòng sang Windows worker
     return WindowsWorker::class;
 }
 
 /**
- * Main execution
+ * Thực thi chính
  */
 try {
     echo "============================================\n";
@@ -109,14 +109,14 @@ try {
     echo "OS: " . PHP_OS . "\n";
     echo "============================================\n\n";
 
-    // Detect and instantiate worker
+    // Phát hiện và khởi tạo worker
     $workerClass = detectWorkerClass();
     echo "Using worker: {$workerClass}\n\n";
 
     /** @var \NukeViet\Module\queue\worker\AbstractWorker $worker */
     $worker = new $workerClass();
 
-    // Apply command line options
+    // Áp dụng các tùy chọn dòng lệnh
     if (isset($options['max-jobs'])) {
         $reflection = new \ReflectionProperty($workerClass, 'maxJobs');
         $reflection->setAccessible(true);
@@ -135,7 +135,7 @@ try {
         $reflection->setValue($worker, (int) $options['max-memory'] * 1048576);
     }
 
-    // Run the worker
+    // Chạy worker
     $worker->run();
 
     echo "\n============================================\n";

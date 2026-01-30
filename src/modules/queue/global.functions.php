@@ -1,15 +1,15 @@
 <?php
 
 /**
- * NukeViet Queue System - Dispatcher Functions
+ * Hệ thống Queue NukeViet - Các hàm Dispatcher
  *
  * @version 1.0
  * @author Antigravity
  * @copyright (C) 2026 VINADES.,JSC. All rights reserved
  * @license GNU/GPL version 2 or any later version
  *
- * This file contains the dispatcher function that pushes jobs to the queue
- * or processes them synchronously using "Fire and Forget" technique.
+ * Tệp này chứa hàm dispatcher để đẩy các công việc vào hàng đợi
+ * hoặc xử lý chúng đồng bộ bằng kỹ thuật "Fire and Forget".
  */
 
 if (!defined('NV_MAINFILE')) {
@@ -17,20 +17,20 @@ if (!defined('NV_MAINFILE')) {
 }
 
 /**
- * Dispatch a job to the queue system.
+ * Dispatch một công việc vào hệ thống hàng đợi.
  *
- * This function supports two modes based on $global_config['sys_use_queue']:
- * - Mode 1 (Redis Async): Pushes the job to Redis for background processing
- * - Mode 0 (Sync Fallback): Uses "Fire and Forget" to process immediately after response
+ * Hàm này hỗ trợ hai chế độ dựa trên $global_config['sys_use_queue']:
+ * - Chế độ 1 (Redis Async): Đẩy công việc vào Redis để xử lý nền
+ * - Chế độ 0 (Sync Fallback): Sử dụng "Fire and Forget" để xử lý ngay sau khi phản hồi
  *
- * @param string $module The module name (e.g., 'news', 'users')
- * @param string $handler The handler class name (e.g., 'SendEmail', 'Jobs\NotifyUser')
- * @param array $data Job data to pass to the handler
- * @param int $priority Job priority (lower = higher priority, future use)
- * @return bool True if job was dispatched successfully
+ * @param string $module Tên module (ví dụ: 'news', 'users')
+ * @param string $handler Tên lớp handler (ví dụ: 'SendEmail', 'Jobs\NotifyUser')
+ * @param array $data Dữ liệu công việc để chuyển cho handler
+ * @param int $priority Mức ưu tiên công việc (thấp hơn = ưu tiên cao hơn, sử dụng trong tương lai)
+ * @return bool True nếu công việc được dispatch thành công
  *
  * @example
- * // Dispatch a job to send notification
+ * // Dispatch một công việc gửi thông báo
  * nv_dispatch_job('news', 'SendNotification', [
  *     'article_id' => 123,
  *     'user_ids' => [1, 2, 3],
@@ -40,9 +40,9 @@ function nv_dispatch_job(string $module, string $handler, array $data = [], int 
 {
     global $global_config, $redis_config, $site_mods;
 
-    // Validate module exists (soft check - worker will validate again)
-    // In CLI context or when dispatching async, $site_mods may not be fully loaded
-    // The worker will perform proper module validation before executing the job
+    // Xác thực module tồn tại (kiểm tra mềm - worker sẽ xác thực lại)
+    // Trong ngữ cảnh CLI hoặc khi dispatch async, $site_mods có thể chưa được tải đầy đủ
+    // Worker sẽ thực hiện xác thực module thích hợp trước khi thực thi công việc
     if (isset($site_mods) && is_array($site_mods) && !empty($site_mods)) {
         if (!isset($site_mods[$module])) {
             trigger_error("nv_dispatch_job: Module '{$module}' not found or not active", E_USER_WARNING);
@@ -51,7 +51,7 @@ function nv_dispatch_job(string $module, string $handler, array $data = [], int 
     }
 
 
-    // Build job payload
+    // Xây dựng payload công việc
     $job = [
         'id' => uniqid('job_', true),
         'module' => $module,
@@ -62,7 +62,7 @@ function nv_dispatch_job(string $module, string $handler, array $data = [], int 
         'created_by' => defined('NV_CLIENT_IP') ? NV_CLIENT_IP : 'system',
     ];
 
-    // Check queue mode
+    // Kiểm tra chế độ hàng đợi
     $useQueue = !empty($global_config['sys_use_queue']);
 
     if ($useQueue) {
@@ -72,19 +72,19 @@ function nv_dispatch_job(string $module, string $handler, array $data = [], int 
             return nv_dispatch_job_database($job);
         }
 
-        // Mode 1: Redis Async (Default)
+        // Chế độ 1: Redis Async (Mặc định)
         return nv_dispatch_job_async($job);
     } else {
-        // Mode 0: Sync Fallback with Fire and Forget
+        // Chế độ 0: Sync Fallback với Fire and Forget
         return nv_dispatch_job_sync($job);
     }
 }
 
 /**
- * Push job to Database queue
+ * Đẩy công việc vào hàng đợi Database
  *
- * @param array $job Job payload
- * @return bool True if pushed successfully
+ * @param array $job Payload công việc
+ * @return bool True nếu đẩy thành công
  */
 function nv_dispatch_job_database(array $job): bool
 {
@@ -97,13 +97,13 @@ function nv_dispatch_job_database(array $job): bool
 
     $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
     
-    // Ensure table exists (simple check to avoid overhead, normally should be created by migration)
-    // We rely on catch block to handle missing table if needed, or create it once.
-    // Ideally this should be done in module install/update.
+    // Đảm bảo bảng tồn tại (kiểm tra đơn giản để tránh overhead, thường nên được tạo bởi migration)
+    // Chúng ta dựa vào khối catch để xử lý bảng bị thiếu nếu cần, hoặc tạo nó một lần.
+    // Lý tưởng nhất là việc này nên được thực hiện trong cài đặt/cập nhật module.
     
     $payload = json_encode($job, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
     $createdAt = time();
-    $availableAt = time(); // Can support delayed jobs later
+    $availableAt = time(); // Có thể hỗ trợ công việc bị trì hoãn sau này
 
     $sql = "INSERT INTO " . $tableName . " (queue, payload, attempts, reserved_at, available_at, created_at) VALUES (:queue, :payload, 0, NULL, :available_at, :created_at)";
     
@@ -118,7 +118,7 @@ function nv_dispatch_job_database(array $job): bool
         $result = $db->insert_id($sql, 'id', $dataInsert);
         return $result > 0;
     } catch (\Throwable $e) {
-        // Try to create table if it doesn't exist
+        // Thử tạo bảng nếu nó không tồn tại
         if (strpos($e->getMessage(), "doesn't exist") !== false) {
              try {
                 $createSql = "CREATE TABLE IF NOT EXISTS " . $tableName . " (
@@ -134,7 +134,7 @@ function nv_dispatch_job_database(array $job): bool
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
                 $db->query($createSql);
                 
-                // Retry insert
+                // Thử lại insert
                 $result = $db->insert_id($sql, 'id', $dataInsert);
                 return $result > 0;
              } catch (\Throwable $ex) {
@@ -149,16 +149,16 @@ function nv_dispatch_job_database(array $job): bool
 }
 
 /**
- * Push job to Redis queue (Async mode)
+ * Đẩy công việc vào hàng đợi Redis (Chế độ Async)
  *
- * @param array $job Job payload
- * @return bool True if pushed successfully
+ * @param array $job Payload công việc
+ * @return bool True nếu đẩy thành công
  */
 function nv_dispatch_job_async(array $job): bool
 {
     global $redis_config;
 
-    // Validate Redis configuration
+    // Xác thực cấu hình Redis
     if (!isset($redis_config) || !is_array($redis_config)) {
         trigger_error(
             'nv_dispatch_job: Redis configuration ($redis_config) is not defined. ' .
@@ -177,7 +177,7 @@ function nv_dispatch_job_async(array $job): bool
     }
 
     try {
-        // Create Redis connection
+        // Tạo kết nối Redis
         $options = [
             'scheme' => 'tcp',
             'host' => $redis_config['host'] ?? '127.0.0.1',
@@ -194,10 +194,10 @@ function nv_dispatch_job_async(array $job): bool
 
         $redis = new \Predis\Client($options);
 
-        // Build queue name
+        // Xây dựng tên hàng đợi
         $queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
 
-        // Push job to queue
+        // Đẩy công việc vào hàng đợi
         $payload = json_encode($job, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $redis->rpush($queueName, [$payload]);
 
@@ -209,25 +209,25 @@ function nv_dispatch_job_async(array $job): bool
 }
 
 /**
- * Process job synchronously using "Fire and Forget" technique.
+ * Xử lý công việc đồng bộ bằng kỹ thuật "Fire and Forget".
  *
- * This method:
- * 1. Cleans the output buffer
- * 2. Sends response headers to close connection with client
- * 3. Uses fastcgi_finish_request() if available
- * 4. Continues processing the job after connection is closed
+ * Phương thức này:
+ * 1. Làm sạch bộ đệm đầu ra
+ * 2. Gửi header phản hồi để đóng kết nối với client
+ * 3. Sử dụng fastcgi_finish_request() nếu có sẵn
+ * 4. Tiếp tục xử lý công việc sau khi kết nối đã đóng
  *
- * @param array $job Job payload
- * @return bool True if job executed successfully
+ * @param array $job Payload công việc
+ * @return bool True nếu công việc được thực thi thành công
  */
 function nv_dispatch_job_sync(array $job): bool
 {
-    // Resolve handler class
+    // Giải quyết lớp handler
     $module = $job['module'];
     $handler = $job['handler'];
     $data = $job['data'];
 
-    // Build full class name
+    // Xây dựng tên lớp đầy đủ
     if (str_contains($handler, '\\')) {
         if (str_starts_with($handler, 'NukeViet\\')) {
             $handlerClass = $handler;
@@ -238,7 +238,7 @@ function nv_dispatch_job_sync(array $job): bool
         $handlerClass = "NukeViet\\Module\\{$module}\\Jobs\\{$handler}";
     }
 
-    // Verify handler exists
+    // Xác minh handler tồn tại
     if (!class_exists($handlerClass)) {
         trigger_error("nv_dispatch_job: Handler class not found: {$handlerClass}", E_USER_WARNING);
         return false;
@@ -249,7 +249,7 @@ function nv_dispatch_job_sync(array $job): bool
         return false;
     }
 
-    // Use Fire and Forget technique
+    // Sử dụng kỹ thuật Fire and Forget
     nv_fire_and_forget(function () use ($handlerClass, $data) {
         try {
             return $handlerClass::handle($data);
@@ -263,51 +263,51 @@ function nv_dispatch_job_sync(array $job): bool
 }
 
 /**
- * Execute a callback after sending response to client.
+ * Thực thi một callback sau khi gửi phản hồi cho client.
  *
- * This implements the "Fire and Forget" pattern:
- * 1. Clean output buffer and prepare response
- * 2. Send response headers to close connection
- * 3. Use fastcgi_finish_request() if available (PHP-FPM)
- * 4. Continue running the callback in background
+ * Điều này thực hiện mẫu "Fire and Forget":
+ * 1. Làm sạch bộ đệm đầu ra và chuẩn bị phản hồi
+ * 2. Gửi header phản hồi để đóng kết nối
+ * 3. Sử dụng fastcgi_finish_request() nếu có sẵn (PHP-FPM)
+ * 4. Tiếp tục chạy callback trong nền
  *
- * @param callable $callback Function to execute in background
+ * @param callable $callback Hàm để thực thi trong nền
  * @return void
  */
 function nv_fire_and_forget(callable $callback): void
 {
-    // Allow script to continue after client disconnects
+    // Cho phép script tiếp tục sau khi client ngắt kết nối
     ignore_user_abort(true);
 
-    // Remove time limit
+    // Loại bỏ giới hạn thời gian
     set_time_limit(0);
 
-    // Close session to prevent blocking other requests
+    // Đóng session để ngăn chặn chặn các yêu cầu khác
     if (session_status() === PHP_SESSION_ACTIVE) {
         session_write_close();
     }
 
-    // Clean output buffer
+    // Làm sạch bộ đệm đầu ra
     $level = ob_get_level();
     for ($i = 0; $i < $level; $i++) {
         ob_end_clean();
     }
 
-    // Start fresh output buffer
+    // Bắt đầu bộ đệm đầu ra mới
     ob_start();
 
-    // Minimal response body
+    // Body phản hồi tối thiểu
     echo json_encode(['status' => 'queued']);
 
-    // Get content length
+    // Lấy độ dài nội dung
     $size = ob_get_length();
 
-    // Send headers to close connection
+    // Gửi header để đóng kết nối
     header('Content-Type: application/json; charset=utf-8');
     header('Content-Length: ' . $size);
     header('Connection: close');
 
-    // Flush and close connection
+    // Flush và đóng kết nối
     ob_end_flush();
 
     if (function_exists('ob_flush')) {
@@ -316,20 +316,20 @@ function nv_fire_and_forget(callable $callback): void
 
     @flush();
 
-    // If using PHP-FPM, use fastcgi_finish_request to properly close connection
+    // Nếu sử dụng PHP-FPM, sử dụng fastcgi_finish_request để đóng kết nối đúng cách
     if (function_exists('fastcgi_finish_request')) {
         fastcgi_finish_request();
     }
 
-    // Now execute the callback in background
-    // Client has already received response and connection is closed
+    // Bây giờ thực thi callback trong nền
+    // Client đã nhận phản hồi và kết nối đã đóng
     $callback();
 }
 
 /**
- * Check if the queue system is enabled.
+ * Kiểm tra xem hệ thống hàng đợi có được bật không.
  *
- * @return bool True if Redis queue is enabled
+ * @return bool True nếu hàng đợi được bật
  */
 function nv_queue_enabled(): bool
 {
@@ -338,9 +338,9 @@ function nv_queue_enabled(): bool
 }
 
 /**
- * Get queue statistics (Redis/Database).
+ * Lấy thống kê hàng đợi (Redis/Database).
  *
- * @return array Queue statistics
+ * @return array Thống kê hàng đợi
  */
 function nv_queue_stats(): array
 {
