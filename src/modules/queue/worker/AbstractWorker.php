@@ -296,7 +296,7 @@ abstract class AbstractWorker
             if ($db_config['dbtype'] == 'mysql' || $db_config['dbtype'] == 'mariadb') {
                 $db->query('START TRANSACTION');
                 
-                $sql = "SELECT id, payload FROM " . $tableName . " WHERE reserved_at IS NULL AND available_at <= " . $now . " ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"; 
+                $sql = "SELECT id, payload, attempts FROM " . $tableName . " WHERE reserved_at IS NULL AND available_at <= " . $now . " ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"; 
                 // SKIP LOCKED is great but requires MySQL 8.0+ / MariaDB 10.6+
                 // Fallback for older versions: simply FOR UPDATE
                 $result = $db->query(str_replace(' SKIP LOCKED', '', $sql)); 
@@ -321,6 +321,7 @@ abstract class AbstractWorker
                     
                     // Add DB ID to job for later deletion
                     $job['__db_id'] = $jobId;
+                    $job['attempts'] = (int) $row['attempts'];
                     
                     return $job;
                 }
@@ -404,12 +405,20 @@ abstract class AbstractWorker
                 }
             } else {
                 $this->log("Job {$jobId} returned false after {$duration}ms", 'warning');
+                if (isset($job['__db_id'])) {
+                    $this->handleFailedJob($job);
+                }
             }
 
             return (bool) $result;
         } catch (\Throwable $e) {
             $this->log("Job {$jobId} failed: " . $e->getMessage(), 'error');
             $this->log("Stack trace: " . $e->getTraceAsString(), 'debug');
+            
+            if (isset($job['__db_id'])) {
+                $this->handleFailedJob($job);
+            }
+            
             return false;
         }
     }
@@ -513,6 +522,45 @@ abstract class AbstractWorker
             'memory_usage_mb' => round(memory_get_usage(true) / 1048576, 2),
             'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 2),
         ];
+    }
+
+    /**
+     * Handle failed job by releasing or deleting
+     */
+    protected function handleFailedJob(array $job): void
+    {
+        global $db, $db_config;
+        
+        $id = $job['__db_id'];
+        // Note: attempts is already incremented in popJob when reserving
+        $attempts = $job['attempts'] ?? 1;
+        
+        // Increase attempts for next check (since DB already has attempts+1)
+        // Wait, the DB column 'attempts' stores how many times it has been popped.
+        // If current value is 1, it means this is the first attempt.
+        // If we release it, we want it to be picked up again.
+        
+        $maxAttempts = 3; // Configurable max attempts
+        
+        if ($attempts < $maxAttempts) {
+            // Release job back to queue
+            $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
+            
+            // Delay 30s * attempts
+            $delay = 30 * $attempts;
+            $availableAt = time() + $delay;
+            
+            try {
+                $db->query("UPDATE " . $tableName . " SET reserved_at = NULL, available_at = " . $availableAt . " WHERE id = " . $id);
+                $this->log("Released job {$id} back to queue for attempt " . ($attempts + 1) . " in {$delay}s", 'info');
+            } catch (\Exception $e) {
+                $this->log("Failed to release job {$id}: " . $e->getMessage(), 'error');
+            }
+        } else {
+            // Max attempts reached - delete job
+            $this->log("Job {$id} exceeded max attempts ({$maxAttempts}). Deleting job.", 'error');
+            $this->deleteJobFromDatabase($id);
+        }
     }
 
     /**
