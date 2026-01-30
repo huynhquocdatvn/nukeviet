@@ -256,11 +256,17 @@ if ($nv_Request->isset_request('checkss', 'post')) {
             if (!empty($email_list)) {
                 $email_list = array_unique($email_list);
                 foreach ($email_list as $to) {
-                    $from = [
-                        $feedback['sender_name'],
-                        $feedback['sender_email']
-                    ];
-                    nv_sendmail_async($from, $to, $feedback['title'], $mail_content, '', false, false, [], [], true, $custom_headers);
+                    // Sử dụng Queue System thay vì nv_sendmail_async
+                    nv_dispatch_job('contact', 'SendContactEmail', [
+                        'type' => 'notify_admin',
+                        'contact_id' => $feedback['id'],
+                        'to' => $to,
+                        'from_name' => $feedback['sender_name'],
+                        'from_email' => $feedback['sender_email'],
+                        'subject' => $feedback['title'],
+                        'content' => $mail_content,
+                        'custom_headers' => $custom_headers,
+                    ]);
                 }
 
                 $auto_forward = array_unique($auto_forward);
@@ -271,12 +277,18 @@ if ($nv_Request->isset_request('checkss', 'post')) {
 
         // Gửi bản sao đến hộp thư người gửi
         if ($fsendcopy) {
-            $from = [
-                $global_config['site_name'],
-                $global_config['site_email']
-            ];
-            $mail_content = contact_sendcontact($feedback, $departments, false);
-            nv_sendmail_async($from, $feedback['sender_email'], $feedback['title'], $mail_content, '', false, false, [], [], true, $custom_headers);
+            $mail_content_copy = contact_sendcontact($feedback, $departments, false);
+            // Sử dụng Queue System thay vì nv_sendmail_async
+            nv_dispatch_job('contact', 'SendContactEmail', [
+                'type' => 'sender_copy',
+                'contact_id' => $feedback['id'],
+                'to' => $feedback['sender_email'],
+                'from_name' => $global_config['site_name'],
+                'from_email' => $global_config['site_email'],
+                'subject' => $feedback['title'],
+                'content' => $mail_content_copy,
+                'custom_headers' => $custom_headers,
+            ]);
         }
 
         nv_insert_notification($module_name, 'contact_new', [
