@@ -1,0 +1,126 @@
+name: 'nukeviet5'
+services:
+
+  # PHP-FPM Application
+  app:
+    build:
+      context: ./php/
+      dockerfile: Dockerfile
+    container_name: nukeviet5_app
+    restart: unless-stopped
+    tty: true
+    environment:
+      SERVICE_NAME: app
+      SERVICE_TAGS: dev
+      # Redis configuration for workers
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    working_dir: /var/www
+    volumes:
+      - ./../:/var/www
+      - ./php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    networks:
+      - nukeviet5-network
+    depends_on:
+      - db
+      - redis
+
+  # NGINX Web Server
+  webserver:
+    image: nginx:alpine
+    container_name: nukeviet5_webserver
+    restart: unless-stopped
+    tty: true
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./../:/var/www
+      - ./nginx/:/etc/nginx/conf.d/
+    networks:
+      - nukeviet5-network
+    depends_on:
+      - app
+
+  # MariaDB Database
+  db:
+    image: mariadb:11
+    container_name: nukeviet5_db
+    restart: unless-stopped
+    tty: true
+    environment:
+      MYSQL_DATABASE: nukeviet5
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_USER: nukeviet
+      MYSQL_PASSWORD: nukeviet_password
+      SERVICE_TAGS: dev
+      SERVICE_NAME: mariadb
+    volumes:
+      - dbdata:/var/lib/mysql/
+      - ./mariadb/my.cnf:/etc/mysql/conf.d/my.cnf
+    ports:
+      - "3306:3306"
+    networks:
+      - nukeviet5-network
+
+  # Redis for Queue/Worker
+  redis:
+    image: redis:7-alpine
+    container_name: nukeviet5_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - nukeviet5-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # phpMyAdmin
+  phpmyadmin:
+    image: phpmyadmin:apache
+    container_name: nukeviet5_phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: password
+      MYSQL_ROOT_PASSWORD: password
+      UPLOAD_LIMIT: 100M
+    ports:
+      - "8001:80"
+    depends_on:
+      - db
+    networks:
+      - nukeviet5-network
+
+  # Redis Commander (Web UI for Redis)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: nukeviet5_redis_commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8002:8081"
+    depends_on:
+      - redis
+    networks:
+      - nukeviet5-network
+
+# Networks
+networks:
+  nukeviet5-network:
+    driver: bridge
+
+# Volumes
+volumes:
+  dbdata:
+    driver: local
+  redisdata:
+    driver: local
