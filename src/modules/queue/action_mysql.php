@@ -24,8 +24,20 @@ $sql_create_module[] = "CREATE TABLE IF NOT EXISTS " . $tableName . " (
     KEY queue_reserved_available (queue, reserved_at, available_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci";
 
+// 1.1 Insert default config
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'active', '0')";
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'driver', 'database')";
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'redis_host', '127.0.0.1')";
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'redis_port', '6379')";
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'redis_pass', '')";
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'redis_db', '0')";
+$sql_create_module[] = "INSERT IGNORE INTO " . $db_config['prefix'] . "_config (lang, module, config_name, config_value) VALUES ('sys', '" . $module_name . "', 'redis_prefix', 'nv_queue_')";
+
 // Drop table on uninstall
 $sql_drop_module[] = "DROP TABLE IF EXISTS " . $tableName;
+
+// Remove config on uninstall
+$sql_drop_module[] = "DELETE FROM " . $db_config['prefix'] . "_config WHERE module='" . $module_name . "'";
 
 // 2. Register Autoloader Plugin
 // This ensures that modules/queue/hooks/autoloader.php is loaded on every request

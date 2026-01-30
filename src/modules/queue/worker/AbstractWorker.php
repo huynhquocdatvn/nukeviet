@@ -92,15 +92,16 @@ abstract class AbstractWorker
      */
     public function __construct()
     {
-        global $redis_config, $global_config;
+        // Tải cấu hình từ database
+        $queue_config = $this->loadConfigFromDb();
 
-        $this->driver = $global_config['queue_driver'] ?? 'redis';
+        $this->driver = $queue_config['driver'] ?? 'database';
 
         if ($this->driver === 'redis') {
-            if (!isset($redis_config) || !is_array($redis_config)) {
+            if (empty($queue_config['redis_host'])) {
                 throw new \RuntimeException(
-                    'Redis configuration ($redis_config) is not defined in config.php. ' .
-                    'Please add Redis configuration with host, port, password, database, and prefix keys.'
+                    'Redis configuration is not defined in database. ' .
+                    'Please configure Redis in Queue module admin.'
                 );
             }
 
@@ -111,8 +112,14 @@ abstract class AbstractWorker
                 );
             }
 
-            $this->redisConfig = $redis_config;
-            $this->queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
+            $this->redisConfig = [
+                'host' => $queue_config['redis_host'],
+                'port' => $queue_config['redis_port'],
+                'password' => $queue_config['redis_pass'],
+                'database' => $queue_config['redis_db'],
+                'prefix' => $queue_config['redis_prefix'],
+            ];
+            $this->queueName = ($this->redisConfig['prefix'] ?? 'nv_queue_') . 'jobs';
             
             $this->connectRedis();
         } else {
@@ -121,6 +128,40 @@ abstract class AbstractWorker
         }
         
         $this->startTime = time();
+    }
+
+    /**
+     * Tải cấu hình hàng đợi từ database
+     */
+    protected function loadConfigFromDb(): array
+    {
+        global $db, $db_config;
+
+        // Đảm bảo kết nối
+        if (!is_object($db) || empty($db->connect)) {
+            $this->reconnectDatabase();
+        }
+
+        $config = [];
+        $module_name = 'queue';
+        try {
+            $sql = "SELECT config_name, config_value FROM " . $db_config['prefix'] . "_config WHERE lang='sys' AND module='" . $module_name . "'";
+            $result = $db->query($sql);
+            while ($row = $result->fetch()) {
+                $config[$row['config_name']] = $row['config_value'];
+            }
+        } catch (\Exception $e) {
+            $this->log("Error loading config from database: " . $e->getMessage(), 'error');
+        }
+
+        return array_merge([
+            'driver' => 'database',
+            'redis_host' => '127.0.0.1',
+            'redis_port' => 6379,
+            'redis_pass' => '',
+            'redis_db' => 0,
+            'redis_prefix' => 'nv_queue_',
+        ], $config);
     }
 
     /**

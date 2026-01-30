@@ -110,16 +110,6 @@ if ($saved_dbpass !== null) {
 }
 unset($saved_dbpass);
 
-/**
- * Xác minh cấu hình Redis có tồn tại.
- * Mảng $redis_config nên được định nghĩa trong config.php.
- */
-global $redis_config;
-if (!isset($redis_config) || !is_array($redis_config)) {
-    fwrite(STDERR, "Warning: \$redis_config is not defined in config.php.\n");
-    fwrite(STDERR, "Queue system will not be able to connect to Redis.\n");
-    fwrite(STDERR, "Please add Redis configuration to your config.php file.\n");
-}
 
 /**
  * Xuất thông báo thành công cho mục đích debug.

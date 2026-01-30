@@ -38,7 +38,7 @@ if (!defined('NV_MAINFILE')) {
  */
 function nv_dispatch_job(string $module, string $handler, array $data = [], int $priority = 0): bool
 {
-    global $global_config, $redis_config, $site_mods;
+    global $site_mods, $db, $db_config;
 
     // Xác thực module tồn tại (kiểm tra mềm - worker sẽ xác thực lại)
     // Trong ngữ cảnh CLI hoặc khi dispatch async, $site_mods có thể chưa được tải đầy đủ
@@ -62,18 +62,19 @@ function nv_dispatch_job(string $module, string $handler, array $data = [], int 
         'created_by' => defined('NV_CLIENT_IP') ? NV_CLIENT_IP : 'system',
     ];
 
-    // Kiểm tra chế độ hàng đợi
-    $useQueue = !empty($global_config['sys_use_queue']);
+    // Lấy cấu hình từ database
+    $queue_config = nv_queue_get_config();
+    $useQueue = !empty($queue_config['active']);
 
     if ($useQueue) {
-        $driver = $global_config['queue_driver'] ?? 'redis';
+        $driver = $queue_config['driver'] ?? 'database';
         
         if ($driver === 'database') {
             return nv_dispatch_job_database($job);
         }
 
         // Chế độ 1: Redis Async (Mặc định)
-        return nv_dispatch_job_async($job);
+        return nv_dispatch_job_async($job, $queue_config);
     } else {
         // Chế độ 0: Sync Fallback với Fire and Forget
         return nv_dispatch_job_sync($job);
@@ -154,15 +155,17 @@ function nv_dispatch_job_database(array $job): bool
  * @param array $job Payload công việc
  * @return bool True nếu đẩy thành công
  */
-function nv_dispatch_job_async(array $job): bool
+function nv_dispatch_job_async(array $job, array $queue_config = []): bool
 {
-    global $redis_config;
+    if (empty($queue_config)) {
+        $queue_config = nv_queue_get_config();
+    }
 
     // Xác thực cấu hình Redis
-    if (!isset($redis_config) || !is_array($redis_config)) {
+    if (empty($queue_config['redis_host'])) {
         trigger_error(
-            'nv_dispatch_job: Redis configuration ($redis_config) is not defined. ' .
-            'Please add Redis configuration to config.php.',
+            'nv_dispatch_job: Redis configuration is not defined in database. ' .
+            'Please configure Redis in Queue module admin.',
             E_USER_WARNING
         );
         return false;
@@ -180,22 +183,22 @@ function nv_dispatch_job_async(array $job): bool
         // Tạo kết nối Redis
         $options = [
             'scheme' => 'tcp',
-            'host' => $redis_config['host'] ?? '127.0.0.1',
-            'port' => (int) ($redis_config['port'] ?? 6379),
+            'host' => $queue_config['redis_host'] ?? '127.0.0.1',
+            'port' => (int) ($queue_config['redis_port'] ?? 6379),
         ];
 
-        if (!empty($redis_config['password'])) {
-            $options['password'] = $redis_config['password'];
+        if (!empty($queue_config['redis_pass'])) {
+            $options['password'] = $queue_config['redis_pass'];
         }
 
-        if (isset($redis_config['database'])) {
-            $options['database'] = (int) $redis_config['database'];
+        if (isset($queue_config['redis_db'])) {
+            $options['database'] = (int) $queue_config['redis_db'];
         }
 
         $redis = new \Predis\Client($options);
 
         // Xây dựng tên hàng đợi
-        $queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
+        $queueName = ($queue_config['redis_prefix'] ?? 'nv_queue_') . 'jobs';
 
         // Đẩy công việc vào hàng đợi
         $payload = json_encode($job, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
@@ -333,8 +336,8 @@ function nv_fire_and_forget(callable $callback): void
  */
 function nv_queue_enabled(): bool
 {
-    global $global_config;
-    return !empty($global_config['sys_use_queue']);
+    $config = nv_queue_get_config();
+    return !empty($config['active']);
 }
 
 /**
@@ -344,9 +347,10 @@ function nv_queue_enabled(): bool
  */
 function nv_queue_stats(): array
 {
-    global $global_config, $redis_config, $db, $db_config;
+    global $db, $db_config;
 
-    $driver = $global_config['queue_driver'] ?? 'redis';
+    $queue_config = nv_queue_get_config();
+    $driver = $queue_config['driver'] ?? 'database';
 
     if ($driver === 'database') {
         if (!is_object($db)) {
@@ -382,20 +386,20 @@ function nv_queue_stats(): array
     try {
         $options = [
             'scheme' => 'tcp',
-            'host' => $redis_config['host'] ?? '127.0.0.1',
-            'port' => (int) ($redis_config['port'] ?? 6379),
+            'host' => $queue_config['redis_host'] ?? '127.0.0.1',
+            'port' => (int) ($queue_config['redis_port'] ?? 6379),
         ];
 
-        if (!empty($redis_config['password'])) {
-            $options['password'] = $redis_config['password'];
+        if (!empty($queue_config['redis_pass'])) {
+            $options['password'] = $queue_config['redis_pass'];
         }
 
-        if (isset($redis_config['database'])) {
-            $options['database'] = (int) $redis_config['database'];
+        if (isset($queue_config['redis_db'])) {
+            $options['database'] = (int) $queue_config['redis_db'];
         }
 
         $redis = new \Predis\Client($options);
-        $queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
+        $queueName = ($queue_config['redis_prefix'] ?? 'nv_queue_') . 'jobs';
 
         return [
             'queue_driver' => 'redis',
@@ -410,4 +414,43 @@ function nv_queue_stats(): array
             'redis_connected' => false,
         ];
     }
+}
+/**
+ * Lấy cấu hình hệ thống hàng đợi từ database.
+ *
+ * @return array Cấu hình hàng đợi
+ */
+function nv_queue_get_config(): array
+{
+    global $db, $db_config;
+
+    static $cache_config = null;
+    if ($cache_config !== null) {
+        return $cache_config;
+    }
+
+    $module_name = 'queue';
+    $config = [];
+    try {
+        $sql = "SELECT config_name, config_value FROM " . $db_config['prefix'] . "_config WHERE lang='sys' AND module='" . $module_name . "'";
+        $result = $db->query($sql);
+        while ($row = $result->fetch()) {
+            $config[$row['config_name']] = $row['config_value'];
+        }
+    } catch (\Throwable $e) {
+        // Fallback or handle error
+    }
+
+    // Mặc định nếu không tìm thấy
+    $cache_config = array_merge([
+        'active' => 0,
+        'driver' => 'database',
+        'redis_host' => '127.0.0.1',
+        'redis_port' => 6379,
+        'redis_pass' => '',
+        'redis_db' => 0,
+        'redis_prefix' => 'nv_queue_',
+    ], $config);
+
+    return $cache_config;
 }
