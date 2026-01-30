@@ -66,11 +66,85 @@ function nv_dispatch_job(string $module, string $handler, array $data = [], int 
     $useQueue = !empty($global_config['sys_use_queue']);
 
     if ($useQueue) {
-        // Mode 1: Redis Async
+        $driver = $global_config['queue_driver'] ?? 'redis';
+        
+        if ($driver === 'database') {
+            return nv_dispatch_job_database($job);
+        }
+
+        // Mode 1: Redis Async (Default)
         return nv_dispatch_job_async($job);
     } else {
         // Mode 0: Sync Fallback with Fire and Forget
         return nv_dispatch_job_sync($job);
+    }
+}
+
+/**
+ * Push job to Database queue
+ *
+ * @param array $job Job payload
+ * @return bool True if pushed successfully
+ */
+function nv_dispatch_job_database(array $job): bool
+{
+    global $db, $db_config;
+
+    if (!is_object($db)) {
+        trigger_error('nv_dispatch_job: Database connection not available', E_USER_WARNING);
+        return false;
+    }
+
+    $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
+    
+    // Ensure table exists (simple check to avoid overhead, normally should be created by migration)
+    // We rely on catch block to handle missing table if needed, or create it once.
+    // Ideally this should be done in module install/update.
+    
+    $payload = json_encode($job, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    $createdAt = time();
+    $availableAt = time(); // Can support delayed jobs later
+
+    $sql = "INSERT INTO " . $tableName . " (queue, payload, attempts, reserved_at, available_at, created_at) VALUES (:queue, :payload, 0, NULL, :available_at, :created_at)";
+    
+    $dataInsert = [
+        'queue' => 'default',
+        'payload' => $payload,
+        'available_at' => $availableAt,
+        'created_at' => $createdAt
+    ];
+
+    try {
+        $result = $db->insert_id($sql, 'id', $dataInsert);
+        return $result > 0;
+    } catch (\Throwable $e) {
+        // Try to create table if it doesn't exist
+        if (strpos($e->getMessage(), "doesn't exist") !== false) {
+             try {
+                $createSql = "CREATE TABLE IF NOT EXISTS " . $tableName . " (
+                    id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+                    queue VARCHAR(255) NOT NULL DEFAULT 'default',
+                    payload LONGTEXT NOT NULL,
+                    attempts TINYINT(3) UNSIGNED NOT NULL DEFAULT 0,
+                    reserved_at INT(10) UNSIGNED DEFAULT NULL,
+                    available_at INT(10) UNSIGNED NOT NULL,
+                    created_at INT(10) UNSIGNED NOT NULL,
+                    PRIMARY KEY (id),
+                    KEY queue_reserved_available (queue, reserved_at, available_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
+                $db->query($createSql);
+                
+                // Retry insert
+                $result = $db->insert_id($sql, 'id', $dataInsert);
+                return $result > 0;
+             } catch (\Throwable $ex) {
+                 trigger_error('nv_dispatch_job: Failed to create table or insert job to Database: ' . $ex->getMessage(), E_USER_WARNING);
+                 return false;
+             }
+        }
+        
+        trigger_error('nv_dispatch_job: Failed to insert job to Database: ' . $e->getMessage(), E_USER_WARNING);
+        return false;
     }
 }
 
@@ -256,13 +330,38 @@ function nv_queue_enabled(): bool
 }
 
 /**
- * Get queue statistics (requires Redis connection).
+ * Get queue statistics (Redis/Database).
  *
  * @return array Queue statistics
  */
 function nv_queue_stats(): array
 {
-    global $redis_config;
+    global $global_config, $redis_config, $db, $db_config;
+
+    $driver = $global_config['queue_driver'] ?? 'redis';
+
+    if ($driver === 'database') {
+        if (!is_object($db)) {
+             $db = new \NukeViet\Core\Database($db_config);
+        }
+        $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
+        try {
+            $sql = "SELECT COUNT(*) FROM " . $tableName . " WHERE reserved_at IS NULL";
+            $result = $db->query($sql);
+            $count = $result->fetchColumn();
+            return [
+                'queue_driver' => 'database',
+                'queue_name' => 'default',
+                'pending_jobs' => $count,
+                'redis_connected' => false,
+            ];
+        } catch (\Throwable $e) {
+             return [
+                'queue_driver' => 'database',
+                'error' => $e->getMessage()
+            ];
+        }
+    }
 
     if (!isset($redis_config) || !is_array($redis_config)) {
         return ['error' => 'Redis not configured'];
@@ -287,12 +386,14 @@ function nv_queue_stats(): array
         $queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
 
         return [
+            'queue_driver' => 'redis',
             'queue_name' => $queueName,
             'pending_jobs' => $redis->llen($queueName),
             'redis_connected' => true,
         ];
     } catch (\Throwable $e) {
         return [
+            'queue_driver' => 'redis',
             'error' => $e->getMessage(),
             'redis_connected' => false,
         ];

@@ -85,22 +85,40 @@ abstract class AbstractWorker
      *
      * @throws \RuntimeException If Redis configuration is missing
      */
+    /**
+     * Driver type ('redis' or 'database')
+     */
+    protected string $driver = 'redis';
+
+    /**
+     * Constructor - Initialize Redis connection
+     *
+     * @throws \RuntimeException If Redis configuration is missing
+     */
     public function __construct()
     {
-        global $redis_config;
+        global $redis_config, $global_config;
 
-        if (!isset($redis_config) || !is_array($redis_config)) {
-            throw new \RuntimeException(
-                'Redis configuration ($redis_config) is not defined in config.php. ' .
-                'Please add Redis configuration with host, port, password, database, and prefix keys.'
-            );
+        $this->driver = $global_config['queue_driver'] ?? 'redis';
+
+        if ($this->driver === 'redis') {
+            if (!isset($redis_config) || !is_array($redis_config)) {
+                throw new \RuntimeException(
+                    'Redis configuration ($redis_config) is not defined in config.php. ' .
+                    'Please add Redis configuration with host, port, password, database, and prefix keys.'
+                );
+            }
+
+            $this->redisConfig = $redis_config;
+            $this->queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
+            
+            $this->connectRedis();
+        } else {
+             $this->log("Using Database Queue Driver");
+             $this->queueName = 'default';
         }
-
-        $this->redisConfig = $redis_config;
-        $this->queueName = ($redis_config['prefix'] ?? 'nv_queue_') . 'jobs';
+        
         $this->startTime = time();
-
-        $this->connectRedis();
     }
 
     /**
@@ -193,12 +211,24 @@ abstract class AbstractWorker
     }
 
     /**
-     * Pop a job from the Redis queue
+     * Pop a job from the queue (Redis or Database)
      *
-     * @param int $timeout Timeout in seconds for blocking pop
+     * @param int $timeout Timeout in seconds for blocking pop (Redis only)
      * @return array|null Job data or null if no job available
      */
     protected function popJob(int $timeout = 5): ?array
+    {
+        if ($this->driver === 'database') {
+            return $this->popJobFromDatabase();
+        }
+
+        return $this->popJobFromRedis($timeout);
+    }
+
+    /**
+     * Pop job from Redis
+     */
+    protected function popJobFromRedis(int $timeout = 5): ?array
     {
         try {
             // Use BLPOP for blocking pop with timeout
@@ -225,6 +255,85 @@ abstract class AbstractWorker
             return $job;
         } catch (\Exception $e) {
             $this->log("Error popping job from queue: " . $e->getMessage(), 'error');
+            return null;
+        }
+    }
+
+    /**
+     * Pop job from Database
+     */
+    protected function popJobFromDatabase(): ?array
+    {
+        global $db, $db_config;
+
+        $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
+        
+        // Ensure connection
+        if (!is_object($db) || empty($db->connect)) {
+            $this->reconnectDatabase();
+        }
+
+        try {
+            // Use atomic UPDATE to reserve job (simpler than transaction/locking for MySQL)
+            // Works for MyISAM too (though not recommended)
+            
+            // 1. Find a job
+            // Use current timestamps
+            $now = time();
+            
+            // We need a way to atomically reserve.
+            // Option 1: Locking Read (SELECT FOR UPDATE) - Requires InnoDB
+            // Option 2: Atomic Update with LIMIT 1 (MySQL specific)
+            
+            // Let's use Option 2:
+            // UPDATE table SET reserved_at = ?, attempts = attempts + 1 WHERE reserved_at IS NULL ORDER BY id ASC LIMIT 1
+            // But we need to know WHICH job we updated to fetch it.
+            // With pure PDO/MySQL driver in PHP, it's tricky without transaction.
+            
+            // Simplest approach: Transaction
+            if ($db_config['dbtype'] == 'mysql' || $db_config['dbtype'] == 'mariadb') {
+                $db->query('START TRANSACTION');
+                
+                $sql = "SELECT id, payload FROM " . $tableName . " WHERE reserved_at IS NULL AND available_at <= " . $now . " ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED"; 
+                // SKIP LOCKED is great but requires MySQL 8.0+ / MariaDB 10.6+
+                // Fallback for older versions: simply FOR UPDATE
+                $result = $db->query(str_replace(' SKIP LOCKED', '', $sql)); 
+                
+                $row = $result->fetch();
+                
+                if ($row) {
+                    $jobId = $row['id'];
+                    $payload = $row['payload'];
+                    
+                    // Reserve it
+                    $db->query("UPDATE " . $tableName . " SET reserved_at = " . $now . ", attempts = attempts + 1 WHERE id = " . $jobId);
+                    
+                    $db->query('COMMIT');
+                    
+                    $job = json_decode($payload, true);
+                     if (json_last_error() !== JSON_ERROR_NONE) {
+                        // Mark as failed/deleted?
+                        $db->query("DELETE FROM " . $tableName . " WHERE id = " . $jobId);
+                        return null;
+                    }
+                    
+                    // Add DB ID to job for later deletion
+                    $job['__db_id'] = $jobId;
+                    
+                    return $job;
+                }
+                
+                $db->query('COMMIT');
+            }
+            
+            // If no job found, sleep a bit to avoid CPU spin (polling)
+            usleep(1000000); // 1 second
+            
+            return null;
+
+        } catch (\Exception $e) {
+            $this->log("Error popping job from database: " . $e->getMessage(), 'error');
+            // Try reconnecting next time
             return null;
         }
     }
@@ -286,6 +395,11 @@ abstract class AbstractWorker
 
             if ($result) {
                 $this->log("Job {$jobId} completed in {$duration}ms");
+                
+                // If database driver, delete job after completion
+                if (isset($job['__db_id'])) {
+                    $this->deleteJobFromDatabase($job['__db_id']);
+                }
             } else {
                 $this->log("Job {$jobId} returned false after {$duration}ms", 'warning');
             }
@@ -397,6 +511,20 @@ abstract class AbstractWorker
             'memory_usage_mb' => round(memory_get_usage(true) / 1048576, 2),
             'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 2),
         ];
+    }
+
+    /**
+     * Delete job from database (after successful processing)
+     */
+    protected function deleteJobFromDatabase($id): void
+    {
+        global $db, $db_config;
+        $tableName = ($db_config['prefix'] ?? 'nv4') . '_queue_jobs';
+        try {
+            $db->query("DELETE FROM " . $tableName . " WHERE id = " . $id);
+        } catch (\Exception $e) {
+            $this->log("Failed to delete job {$id} from database: " . $e->getMessage(), 'error');
+        }
     }
 
     /**

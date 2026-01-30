@@ -73,11 +73,16 @@ require $autoloadPath;
  * it after mainfile.php runs.
  */
 $configPath = NV_ROOTDIR . '/config.php';
+$saved_dbpass = null;
 if (file_exists($configPath)) {
-    require $configPath;
-    $saved_dbpass = $db_config['dbpass'] ?? null;
-} else {
-    $saved_dbpass = null;
+    // Read config file content
+    $content = file_get_contents($configPath);
+    
+    // Extract dbpass using regex to avoid requiring the file
+    // This prevents NV_MAINFILE conflict and 'Stop!!!' exit
+    if (preg_match('/\$db_config\[[\'"]dbpass[\'"]\]\s*=\s*[\'"](.*?)[\'"]\s*;/', $content, $matches)) {
+        $saved_dbpass = $matches[1];
+    }
 }
 
 /**
