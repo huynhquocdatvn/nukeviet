@@ -17,7 +17,7 @@ services:
       REDIS_PORT: 6379
     working_dir: /var/www
     volumes:
-      - ./../:/var/www
+      - ./../src/:/var/www
       - ./php/local.ini:/usr/local/etc/php/conf.d/local.ini
     networks:
       - nukeviet5-network
@@ -35,7 +35,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./../:/var/www
+      - ./../src/:/var/www
       - ./nginx/:/etc/nginx/conf.d/
     networks:
       - nukeviet5-network
