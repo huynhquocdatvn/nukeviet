@@ -47,38 +47,39 @@ class Encryption
     }
 
     /**
-     * hash()
+     * Tạo mã băm HMAC-SHA1 cho dữ liệu đầu vào, cùng dữ liệu đầu vào sẽ
+     * tạo ra dùng dữ liệu đầu ra. Phụ thuộc vào sitekey của hệ thống. Sitekey mất thì
+     * dữ liệu cũ sẽ không thể giải mã được nữa. Do đó cần lưu trữ sitekey cẩn thận.
+     *
+     * VUI LÒNG KHÔNG SỬ DỤNG hàm này liên quan đến mật khẩu.
      *
      * @param mixed $data
-     * @param bool  $is_salt
      * @return string
      */
-    public function hash($data, $is_salt = false)
+    public function hash($data)
     {
         $inner = pack('H32', sha1($this->_ipad . $data));
-        $digest = sha1($this->_opad . $inner);
-        if (!$is_salt) {
-            return $digest;
-        }
-
-        $salt = substr(sha1(microtime(true) . $this->_key . random_bytes(8)), 0, 8);
-        $derivedSalt = hash_pbkdf2('sha1', $digest, $salt, 4, 8, true);
-        $finalHash = hash('sha1', $digest . $derivedSalt, true);
-        $encoded = strtr(base64_encode($finalHash . $derivedSalt), '+/=', '-_,');
-        return $encoded;
+        return sha1($this->_opad . $inner);
     }
 
     /**
      * hash_password()
      *
+     * WARNING: Vẫn hỗ trợ khởi tạo mã băm MD5 và SHA1 đã lỗi thời.
+     * @deprecated Khuyến nghị không sử dụng cho các hệ thống tạo mới. Thay thế bằng password_hash() gốc của PHP.
+     * @todo Thêm cấu hình vô hiệu hóa việc tạo mới mật khẩu bằng thuật toán cũ, ép buộc dùng SSHA512 hoặc thuật toán an toàn hơn.
+     *
      * @param string $password
      * @param string $hashprefix
      * @return string
      */
-    public function hash_password($password, $hashprefix = '{SSHA}')
+    public function hash_password($password, $hashprefix = '{CRYPT}')
     {
+        if ($hashprefix == '{CRYPT}') {
+            return '{CRYPT}' . password_hash($password, PASSWORD_BCRYPT);
+        }
         if ($hashprefix == '{SSHA512}') {
-            $salt = substr(sha1(microtime() . $this->_key), 0, 4);
+            $salt = random_bytes(16);
 
             return '{SSHA512}' . base64_encode(hash('sha512', $password . $salt, true) . $salt);
         }
@@ -105,13 +106,19 @@ class Encryption
     /**
      * validate_password()
      *
+     * Xác thực mật khẩu hỗ trợ các chuẩn băm cũ (MD5, SHA, SSHA).
+     * @deprecated Quá trình kiểm tra phụ thuộc vào các thuật toán băm yếu.
+     * @todo Thêm cơ chế "needs_rehash" (tương tự password_needs_rehash của PHP) để tự động nâng cấp mật khẩu cũ (MD5/SHA) sang chuẩn mới khi người dùng đăng nhập thành công.
+     *
      * @param string $password
      * @param string $hash
      * @return bool
      */
     public function validate_password($password, $hash)
     {
-        if (substr($hash, 0, 9) == '{SSHA512}') {
+        if (substr($hash, 0, 7) == '{CRYPT}') {
+            return password_verify($password, substr($hash, 7));
+        } elseif (substr($hash, 0, 9) == '{SSHA512}') {
             $salt = substr(base64_decode(substr($hash, 9), true), 64);
             $validate_hash = '{SSHA512}' . base64_encode(hash('sha512', $password . $salt, true) . $salt);
         } elseif (substr($hash, 0, 9) == '{SSHA256}') {
@@ -132,33 +139,79 @@ class Encryption
     }
 
     /**
-     * encrypt()
+     * Mã hóa dữ liệu bằng thuật toán AES-256-GCM,
+     * Cùng một dữ liệu đầu vào mỗi lần mã hóa cho ra kết quả khác nhau
+     * Định dạng kết quả: base64url(iv[12] | tag[16] | ciphertext).
+     *
+     * KHÔNG dùng cho việc so khớp chuỗi mã hóa, dùng an toàn cho dữ liệu mà người dùng tiếp cận được như
+     * cookie, url, header, html...
      *
      * @param mixed  $data
-     * @param string $iv
-     * @return string
+     * @param string $aad Dữ liệu xác thực bổ sung để ràng buộc ngữ cảnh
+     * @return false|string
      */
-    public function encrypt($data, $iv = '')
+    public function encrypt($data, $aad = '')
     {
-        $iv = empty($iv) ? substr($this->_key, 0, 16) : substr($iv, 0, 16);
+        $iv = random_bytes(12);
+        $tag = '';
+        $ciphertext = openssl_encrypt((string) $data, 'aes-256-gcm', $this->_key, OPENSSL_RAW_DATA, $iv, $tag, (string) $aad, 16);
+        if ($ciphertext === false) {
+            return false;
+        }
 
-        $data = openssl_encrypt($data, 'aes-256-cbc', $this->_key, 0, $iv);
+        return strtr(base64_encode($iv . $tag . $ciphertext), '+/=', '-_,');
+    }
+
+    /**
+     * Giải mã dữ liệu tạo bởi encrypt() (AES-256-GCM)
+     *
+     * @param mixed  $data
+     * @param string $aad Dữ liệu xác thực bổ sung, phải trùng với lúc mã hóa
+     * @return false|string
+     */
+    public function decrypt($data, $aad = '')
+    {
+        $raw = base64_decode(strtr((string) $data, '-_,', '+/='), true);
+        if ($raw === false or strlen($raw) < 28) {
+            return false;
+        }
+        $iv = substr($raw, 0, 12);
+        $tag = substr($raw, 12, 16);
+        $ciphertext = substr($raw, 28);
+
+        return openssl_decrypt($ciphertext, 'aes-256-gcm', $this->_key, OPENSSL_RAW_DATA, $iv, $tag, (string) $aad);
+    }
+
+    /**
+     * Mã hóa so khớp, cùng dữ liệu đầu vào cho ra cùng dữ liệu mã hóa.
+     * Không sử dụng cho dữ liệu xuất hiện trên url/cookie/html nơi người dùng nhìn thấy được.
+     * Chỉ dùng cho dữ liệu nội bộ với yêu cầu so khớp, dữ liệu nội bộ không bắt buộc so khớp
+     * cũng nên dùng encrypt() để tăng tính bảo mật.
+     *
+     * @param mixed $data
+     * @return false|string
+     */
+    public function encryptDeterministic($data)
+    {
+        $iv = substr($this->_key, 0, 16);
+        $data = openssl_encrypt((string) $data, 'aes-256-cbc', $this->_key, 0, $iv);
+        if ($data === false) {
+            return false;
+        }
 
         return strtr($data, '+/=', '-_,');
     }
 
     /**
-     * decrypt()
+     * Giải mã dữ liệu tạo bởi encryptDeterministic().
      *
-     * @param mixed  $data
-     * @param string $iv
+     * @param mixed $data
      * @return false|string
      */
-    public function decrypt($data, $iv = '')
+    public function decryptDeterministic($data)
     {
-        $iv = empty($iv) ? substr($this->_key, 0, 16) : substr($iv, 0, 16);
-
-        $data = strtr($data, '-_,', '+/=');
+        $iv = substr($this->_key, 0, 16);
+        $data = strtr((string) $data, '-_,', '+/=');
 
         return openssl_decrypt($data, 'aes-256-cbc', $this->_key, 0, $iv);
     }
@@ -186,6 +239,9 @@ class Encryption
 
     /**
      * decodeJwt()
+     *
+     * WARNING: Hàm này chỉ thực hiện giải mã (decode) chuỗi JWT để trích xuất dữ liệu (header và payload) mà KHÔNG HỀ XÁC THỰC (verify) chữ ký.
+     * TUYỆT ĐỐI KHÔNG dùng hàm này để kiểm tra quyền hạn hay tính hợp lệ của token do kẻ tấn công có thể dễ dàng làm giả payload.
      *
      * @param mixed $token
      * @return array

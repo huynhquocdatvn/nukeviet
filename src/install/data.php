@@ -73,7 +73,8 @@ $csp = [
             '*.facebook.com',
             'tawk.link',
             '*.tawk.to',
-            'static.nukeviet.vn'
+            'nukeviet.vn',
+            '*.nukeviet.vn'
         ]
     ],
     'font-src' => [
@@ -182,6 +183,8 @@ $sql_create_table[] = 'INSERT INTO ' . NV_CONFIG_GLOBALTABLE . " (lang, module, 
 ('sys', 'site', 'nv_csp', '" . addslashes($csp) . "'),
 ('sys', 'site', 'nv_csp_act', '1'),
 ('sys', 'site', 'nv_csp_script_nonce', '0'),
+('sys', 'site', 'frame_ancestors', '0'),
+('sys', 'site', 'frame_ancestors_hosts', ''),
 ('sys', 'site', 'nv_rp', 'no-referrer-when-downgrade, strict-origin-when-cross-origin'),
 ('sys', 'site', 'nv_rp_act', '1'),
 ('sys', 'site', 'nv_pp', 'accelerometer=(self), autoplay=(self \"https://youtube.com\" \"https://www.youtube.com\" \"https://*.youtube.com\"), camera=(self), display-capture=(self), encrypted-media=(self), fullscreen=(self \"https://youtube.com\" \"https://www.youtube.com\" \"https://*.youtube.com\"), gamepad=(self), geolocation=(self), gyroscope=(self), hid=(self), identity-credentials-get=(self), idle-detection=(self), local-fonts=(self), magnetometer=(self), microphone=(self), midi=(self), otp-credentials=(self), payment=(self), picture-in-picture=(self \"https://youtube.com\" \"https://www.youtube.com\" \"https://*.youtube.com\" \"https://*.cloudflare.com\"), publickey-credentials-get=(self), screen-wake-lock=(self), serial=(self), storage-access=(self), usb=(self), web-share=(self), window-management=(self), xr-spatial-tracking=(self)'),
@@ -364,7 +367,6 @@ $sql_create_table[] = 'INSERT INTO ' . $db_config['prefix'] . "_setup_extensions
 (283, 'module', 'feeds', 1, 0, 'feeds', 'feeds', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),
 (282, 'module', 'page', 1, 1, 'page', 'page', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),
 (281, 'module', 'comment', 1, 0, 'comment', 'comment', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),
-(312, 'module', 'freecontent', 0, 1, 'freecontent', 'freecontent', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),
 (327, 'module', 'two-step-verification', 1, 0, 'two-step-verification', 'two_step_verification', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),
 (307, 'theme', 'default', 0, 0, 'default', 'default', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),
 (311, 'theme', 'mobile_default', 0, 0, 'mobile_default', 'mobile_default', '" . $global_config['version'] . " " . $global_config['version_time'] . "', " . NV_CURRENTTIME . ", 'VINADES.,JSC <contact@vinades.vn>', ''),

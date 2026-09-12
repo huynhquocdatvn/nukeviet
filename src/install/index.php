@@ -874,7 +874,6 @@ if ($step == 1) {
                             ['sys', 'global', 'cookie_prefix', $global_config['cookie_prefix']],
                             ['sys', 'global', 'session_prefix', $global_config['session_prefix']],
                             ['sys', 'global', 'site_timezone', $global_config['site_timezone']],
-                            ['sys', 'global', 'proxy_blocker', $global_config['proxy_blocker']],
                             ['sys', 'global', 'str_referer_blocker', $global_config['str_referer_blocker']],
                             ['sys', 'global', 'lang_multi', $global_config['lang_multi']],
                             ['sys', 'global', 'lang_geo', $global_config['lang_geo']],
@@ -883,7 +882,9 @@ if ($step == 1) {
                             ['sys', 'global', 'ftp_user_name', $global_config['ftp_user_name']],
                             ['sys', 'global', 'ftp_user_pass', $crypt->encrypt($global_config['ftp_user_pass'])],
                             ['sys', 'global', 'ftp_path', $global_config['ftp_path']],
-                            ['sys', 'global', 'ftp_check_login', $global_config['ftp_check_login']]
+                            ['sys', 'global', 'ftp_check_login', $global_config['ftp_check_login']],
+                            ['sys', 'global', 'trusted_proxies', json_encode($global_config['trusted_proxies'], NV_JSON_ENCODE)],
+                            ['sys', 'global', 'trusted_proxy_enable', $global_config['trusted_proxy_enable']],
                         ];
                         foreach ($configs as $conf) {
                             $stmt->bindValue(':lang', $conf[0], PDO::PARAM_STR);
@@ -1405,7 +1406,8 @@ function nv_save_file_config()
         $content .= "\$global_config['extension_setup_ips'] = [];\n";
         $content .= "\$global_config['core_cdn_url'] = '" . $global_config['core_cdn_url'] . "';\n";
         $content .= "\$global_config['nat_ports'] = [];\n";
-        $content .= '// Readmore: https://wiki.nukeviet.vn/nukeviet4:advanced_setting:file_config';
+        $content .= "\$global_config['user_field_callbacks'] = [];\n";
+        $content .= "// Readmore: https://wiki.nukeviet.vn/nukeviet4:advanced_setting:file_config\n";
 
         if ($step < 7) {
             $content .= "\$global_config['cookie_prefix'] = '" . $global_config['cookie_prefix'] . "';\n";

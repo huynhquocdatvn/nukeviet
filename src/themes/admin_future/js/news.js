@@ -21,6 +21,21 @@ function get_alias(mod, id) {
     return false;
 }
 
+/**
+ * Lọc bớt các thẻ không cần thiết để lấy từ khóa, tag
+ *
+ * @param {string} html Nội dung HTML
+ * @returns {string} Nội dung đã lọc
+ */
+function nv_content_for_tags(html) {
+    if (typeof html != 'string') {
+        return '';
+    }
+    return html
+        .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/\ssrc\s*=\s*("data:[^"]*"|'data:[^']*'|data:[^\s>]*)/gi, '');
+}
+
 $(function () {
     // Select 2
     if ($('.select2').length) {
@@ -128,7 +143,7 @@ $(function () {
                     type: 'POST',
                     url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=content-del&nocache=' + new Date().getTime(),
                     data: {
-                        checkss: $('body').data('checkss'),
+                        checkss: btn.data('delete-list-checkss'),
                         listid: listid.join(',')
                     },
                     success: function (res) {
@@ -152,7 +167,7 @@ $(function () {
                 });
             });
         } else {
-            window.location.href = script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=' + action + '&listid=' + listid.join(',') + '&checkss=' + $('body').data('checkss');
+            window.location.href = script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=' + action + '&listid=' + listid.join(',') + '&checkss=' + btn.data('action-checkss');
         }
     });
 
@@ -634,7 +649,7 @@ $(function () {
                     return {
                         q: params.term,
                         page: params.page || 1,
-                        checkss: $('body').data('checkss')
+                        checkss: iptKeywords.data('checkss')
                     };
                 },
                 cache: false
@@ -662,7 +677,7 @@ $(function () {
                     return {
                         q: params.term,
                         page: params.page || 1,
-                        checkss: $('body').data('checkss')
+                        checkss: iptTags.data('checkss')
                     };
                 },
                 cache: false
@@ -687,24 +702,24 @@ $(function () {
         // Lấy mô tả ngắn gọn
         if (form.data('editor-hometext')) {
             if (typeof CKEDITOR != 'undefined' && CKEDITOR.instances[mdata + '_hometext']) {
-                text += strip_tags(CKEDITOR.instances[mdata + '_hometext'].getData());
+                text += nv_content_for_tags(CKEDITOR.instances[mdata + '_hometext'].getData());
             } else if (typeof window.nveditor != "undefined" && window.nveditor[mdata + '_hometext']) {
-                text += strip_tags(window.nveditor[mdata + '_hometext'].getData());
+                text += nv_content_for_tags(window.nveditor[mdata + '_hometext'].getData());
             }
         } else {
-            text += strip_tags($('[name=hometext]', form).val());
+            text += nv_content_for_tags($('[name=hometext]', form).val());
         }
 
         // Lấy nội dung bài đăng
         text += ' ';
         if (form.data('editor')) {
             if (typeof CKEDITOR != 'undefined' && CKEDITOR.instances[mdata + '_bodyhtml']) {
-                text += strip_tags(CKEDITOR.instances[mdata + '_bodyhtml'].getData());
+                text += nv_content_for_tags(CKEDITOR.instances[mdata + '_bodyhtml'].getData());
             } else if (typeof window.nveditor != "undefined" && window.nveditor[mdata + '_bodyhtml']) {
-                text += strip_tags(window.nveditor[mdata + '_bodyhtml'].getData());
+                text += nv_content_for_tags(window.nveditor[mdata + '_bodyhtml'].getData());
             }
         } else {
-            text += strip_tags($('[name=bodyhtml]', form).val());
+            text += nv_content_for_tags($('[name=bodyhtml]', form).val());
         }
         text = trim(text.replace(/\n|\r/g, ' '));
         if (text != '') {
@@ -751,24 +766,24 @@ $(function () {
         // Lấy mô tả ngắn gọn
         if (form.data('editor-hometext')) {
             if (typeof CKEDITOR != 'undefined' && CKEDITOR.instances[mdata + '_hometext']) {
-                text += strip_tags(CKEDITOR.instances[mdata + '_hometext'].getData());
+                text += nv_content_for_tags(CKEDITOR.instances[mdata + '_hometext'].getData());
             } else if (typeof window.nveditor != "undefined" && window.nveditor[mdata + '_hometext']) {
-                text += strip_tags(window.nveditor[mdata + '_hometext'].getData());
+                text += nv_content_for_tags(window.nveditor[mdata + '_hometext'].getData());
             }
         } else {
-            text += strip_tags($('[name=hometext]', form).val());
+            text += nv_content_for_tags($('[name=hometext]', form).val());
         }
 
         // Lấy nội dung bài đăng
         text += ' ';
         if (form.data('editor')) {
             if (typeof CKEDITOR != 'undefined' && CKEDITOR.instances[mdata + '_bodyhtml']) {
-                text += strip_tags(CKEDITOR.instances[mdata + '_bodyhtml'].getData());
+                text += nv_content_for_tags(CKEDITOR.instances[mdata + '_bodyhtml'].getData());
             } else if (typeof window.nveditor != "undefined" && window.nveditor[mdata + '_bodyhtml']) {
-                text += strip_tags(window.nveditor[mdata + '_bodyhtml'].getData());
+                text += nv_content_for_tags(window.nveditor[mdata + '_bodyhtml'].getData());
             }
         } else {
-            text += strip_tags($('[name=bodyhtml]', form).val());
+            text += nv_content_for_tags($('[name=bodyhtml]', form).val());
         }
         text = trim(text.replace(/\n|\r/g, ' '));
         if (text != '') {
@@ -904,7 +919,7 @@ $(function () {
                         q: params.term,
                         get_topic_json: 1,
                         page: params.page || 1,
-                        checkss: $('body').data('checkss')
+                        checkss: iptTopicId.data('checkss')
                     };
                 }
             },
@@ -1396,7 +1411,7 @@ $(function () {
                         id: iptRelated.data('id'),
                         q: params.term,
                         page: params.page || 1,
-                        checkss: $('body').data('checkss'),
+                        checkss: iptRelated.data('checkss'),
                         get_article_json: 1
                     };
                 },
@@ -1422,7 +1437,7 @@ $(function () {
                 type: 'POST',
                 url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=drafts&nocache=' + new Date().getTime(),
                 data: {
-                    delete: $('body').data('checkss'),
+                    delete: btn.data('checkss'),
                     id: btn.data('id')
                 },
                 dataType: 'json',
@@ -1470,7 +1485,7 @@ $(function () {
                     type: 'POST',
                     url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=drafts&nocache=' + new Date().getTime(),
                     data: {
-                        delete: $('body').data('checkss'),
+                        delete: btn.data('checkss'),
                         listid: listid.join(',')
                     },
                     success: function (respon) {
@@ -1594,36 +1609,6 @@ $(function () {
             });
         });
     });
-
-    if (nv_func_name === 'setting') {
-        // Ẩn/hiện mật khẩu Instant Articles.
-        $(document).on('click', '.btn-eye', function (e) {
-            e.preventDefault();
-            const fieldId = $(this).data('field');
-            const field = $(fieldId);
-            const icon = $('i', this);
-            if (field.attr('type') === 'password') {
-                field.attr('type', 'text');
-                icon.removeClass('fa-eye').addClass('fa-eye-slash');
-            } else {
-                field.attr('type', 'password');
-                icon.removeClass('fa-eye-slash').addClass('fa-eye');
-            }
-        });
-
-        // Tạo mật khẩu ngẫu nhiên cho nguồn cấp Instant Articles.
-        $('[data-toggle="setting-genpass"]').on('click', function (e) {
-            e.preventDefault();
-            const btn = $(this);
-            const field = $(btn.data('field'));
-            if (!field.length) {
-                return;
-            }
-
-            field.prop('type', 'text').val(nv_randomPassword(10)).trigger('input').focus().select();
-            field.closest('.input-group').find('.btn-eye i').removeClass('fa-eye').addClass('fa-eye-slash');
-        });
-    }
 
     if (nv_func_name === 'admins') {
         // Cuộn xuống form khi đang sửa quyền hạn của người dùng.
@@ -2169,11 +2154,6 @@ $(function () {
             if (!$(e.target).closest('.popover').length) {
                 destroyCatPop();
             }
-        });
-
-        $('a.viewinstantrss').click(function(e) {
-            e.preventDefault();
-            modalShow($(this).data('modaltitle'), '<div><input type="text" class="form-control" value="' + $(this).attr('href') + '" data-toggle="selectall"/></div>');
         });
 
         // Xóa chuyên mục

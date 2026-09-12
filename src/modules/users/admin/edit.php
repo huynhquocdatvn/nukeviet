@@ -598,7 +598,7 @@ if ($nv_Request->isset_request('confirm', 'post')) {
     $stmt->bindValue(':last_name', $_user['last_name'], PDO::PARAM_STR);
     $stmt->bindValue(':gender', $_user['gender'], PDO::PARAM_STR);
     $stmt->bindValue(':photo', nv_unhtmlspecialchars($_user['photo']), PDO::PARAM_STR);
-    $stmt->bindValue(':birthday', !empty($_user['birthday']) ? nv_d2u_post($_user['birthday']) : 0, PDO::PARAM_INT);
+    $stmt->bindValue(':birthday', is_string($_user['birthday']) ? nv_d2u_post($_user['birthday']) : $_user['birthday'], PDO::PARAM_INT);
     $stmt->bindValue(':sig', $_user['sig'], PDO::PARAM_STR);
     $stmt->bindValue(':question', $_user['question'], PDO::PARAM_STR);
     $stmt->bindValue(':answer', $_user['answer'], PDO::PARAM_STR);
@@ -837,7 +837,7 @@ foreach ($array_field_config as $row_f) {
             $row_f['filemaxsize'] = $row_f['limited_values']['file_max_size'] ?? 0;
             $row_f['filemaxsize_format'] = nv_convertfromBytes($row_f['limited_values']['file_max_size'] ?? 0);
             $row_f['filemaxnum'] = $row_f['limited_values']['maxnum'] ?? 0;
-            $row_f['csrf'] = csrf_create($admin_info['admin_id'] . '_' . $module_name . '_' . $row_f['field']);
+            $row_f['csrf'] = csrf_create($module_name . '_field_' . $row_f['field']);
             $row_f['url_module'] = NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name;
             $row_f['widthlimit'] = image_size_info($row_f['limited_values']['widthlimit'] ?? '', 'width');
             $row_f['heightlimit'] = image_size_info($row_f['limited_values']['heightlimit'] ?? '', 'height');

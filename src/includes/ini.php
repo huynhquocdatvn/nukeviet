@@ -24,11 +24,16 @@ if (headers_sent() or connection_status() != 0 or connection_aborted()) {
  */
 function server_info_update($config_ini_file)
 {
-    global $nv_Server;
+    global $nv_Server, $global_config;
 
     $proto = $nv_Server->getOriginalProtocol();
     $proto2 = ($proto == 'https') ? 'http' : 'https';
     $host = $nv_Server->getOriginalHost();
+
+    if (!in_array($host, $global_config['my_domains'], true)) {
+        $host = $global_config['my_domains'][0];
+    }
+
     if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
         $host = '[' . $host . ']';
     }
@@ -266,18 +271,13 @@ function set_ini_file(&$sys_info)
     $ini_set = [];
     if ($sys_info['ini_set_support']) {
         check_ini($ini_set, 'display_startup_errors', 0);
-
-        if (version_compare(PHP_VERSION, '8.0.0', '<')) {
-            check_ini($ini_set, 'track_errors', 1);
-        }
-
         check_ini($ini_set, 'log_errors', 0);
         check_ini($ini_set, 'display_errors', 0);
 
         $session_save_handler = ini_get('session.save_handler');
         $session_save_path = ini_get('session.save_path');
         if (strcasecmp($global_config['session_handler'], $session_save_handler) != 0) {
-            if ($global_config['session_handler'] == 'memcached' and in_array('memcached', $sys_info['support_cache'], true) and !empty($global_config['memcached_host']) and !empty($global_config['memcached_port']) ) {
+            if ($global_config['session_handler'] == 'memcached' and in_array('memcached', $sys_info['support_cache'], true) and !empty($global_config['memcached_host']) and !empty($global_config['memcached_port'])) {
                 ini_set('session.save_handler', 'memcached');
                 $session_save_path != $global_config['memcached_host'] . ':' . $global_config['memcached_port'] && ini_set('session.save_path', $global_config['memcached_host'] . ':' . $global_config['memcached_port']);
                 $new_session_save_handler = ini_get('session.save_handler');
@@ -357,14 +357,14 @@ function set_ini_file(&$sys_info)
     $content_config .= '$iniSaveTime = ' . NV_CURRENTTIME . ';';
 
     if (file_put_contents($config_ini_file, $content_config . "\n", LOCK_EX)) {
-        if ($sys_info['curl_support']) {
-            $url = NV_BASE_SITEURL . 'index.php';
-            stripos($url, NV_MY_DOMAIN) !== 0 && $url = NV_MY_DOMAIN . $url;
+        if ($sys_info['curl_support'] and in_array(NV_SERVER_NAME, $global_config['my_domains'], true)) {
+            $url = NV_SERVER_PROTOCOL . '://' . NV_SERVER_NAME . NV_SERVER_PORT . NV_BASE_SITEURL . 'index.php';
             $ch = curl_init($url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, 1);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+            curl_setopt($ch, CURLOPT_MAXREDIRS, 0);
             curl_setopt($ch, CURLOPT_HEADER, false);
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_POSTFIELDS, '__serverInfoUpdate=1');
@@ -379,7 +379,10 @@ function set_ini_file(&$sys_info)
 
 $config_ini_file = NV_ROOTDIR . '/' . NV_DATADIR . '/config_ini.' . NV_SERVER_PROTOCOL . '.' . preg_replace('/[^a-zA-Z0-9\.\_]/', '', NV_SERVER_NAME) . '.php';
 if (isset($_POST['__serverInfoUpdate'])) {
-    server_info_update($config_ini_file);
+    @include $config_ini_file;
+    if (empty($serverInfoUpdated)) {
+        server_info_update($config_ini_file);
+    }
     exit(0);
 }
 
@@ -392,13 +395,13 @@ $iniSaveTime = 0;
 
 @include_once $config_ini_file;
 
-if ($iniSaveTime + 86400 < NV_CURRENTTIME) {
+if (empty($iniSaveTime)) {
     set_ini_file($sys_info);
 }
 
 //Neu he thong khong ho tro php se bao loi
-if (version_compare(PHP_VERSION, '5.6.0') < 0) {
-    throw new \NukeViet\Http\HttpException('You are running an unsupported PHP version. Please upgrade to PHP 5.6 or higher before trying to install Nukeviet Portal', 500);
+if (version_compare(PHP_VERSION, '8.2.0') < 0) {
+    throw new \NukeViet\Http\HttpException('You are running an unsupported PHP version. Please upgrade to PHP 8.2 or higher before trying to install Nukeviet Portal', 500);
 }
 
 //Neu he thong khong ho tro curl se bao loi

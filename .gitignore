@@ -10,12 +10,14 @@
 /.php-cs-fixer.php
 /.vscode
 /.agents
-/ANTIGRAVITY.md
+/.claude/settings.local.json
+/AGENTS.md
 /.github/copilot-instructions.md
 /src/.jsbeautifyrc
 /src/.php-cs-fixer.php
 /src/.vscode
 .mcp.json
+/scripts/composer-audit.txt
 
 /composer.lock
 /vendor
@@ -86,7 +88,6 @@
 /src/assets/*.jpg
 /src/assets/about/*.png
 /src/assets/banners/*.jpg
-/src/assets/freecontent/*.jpg
 /src/assets/news/**/*.jpg
 
 /src/uploads/download

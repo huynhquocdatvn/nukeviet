@@ -42,8 +42,7 @@ if (file_exists(NV_ROOTDIR . '/vendor/autoload.php')) {
 }
 
 // Xac dinh IP cua client
-$ips = new NukeViet\Core\Ips();
-define('NV_FORWARD_IP', $ips::$forward_ip);
+$ips = new NukeViet\Core\Ips(!empty($global_config['trusted_proxy_enable']), $global_config['trusted_proxies'] ?? []);
 define('NV_REMOTE_ADDR', $ips::$remote_addr);
 define('NV_CLIENT_IP', $ips::$remote_ip);
 
@@ -52,11 +51,6 @@ $ErrorHandler = new NukeViet\Core\Error($global_config);
 
 $nv_Server = new NukeViet\Core\Server();
 
-define('NV_SERVER_NAME', $nv_Server->getServerHost());
-define('NV_SERVER_PROTOCOL', $nv_Server->getServerProtocol());
-define('NV_SERVER_PORT', $nv_Server->getServerPort());
-
-define('NV_MY_DOMAIN', $nv_Server->getOriginalDomain());
 define('NV_BASE_SITEURL', $nv_Server->getWebsitePath() . '/');
 define('NV_BASE_ADMINURL', NV_BASE_SITEURL . NV_ADMINDIR . '/');
 
@@ -70,20 +64,28 @@ if (file_exists(NV_ROOTDIR . '/' . NV_CONFIG_FILENAME)) {
 }
 
 if (empty($global_config['my_domains'])) {
-    $global_config['my_domains'] = [NV_SERVER_NAME];
-} else {
-    $global_config['my_domains'] = array_map('trim', explode(',', strtolower($global_config['my_domains'])));
-    // Nếu domain truy cập không đúng sẽ chuyển đến domain đúng (Báo mã 301)
-    if (!in_array(NV_SERVER_NAME, $global_config['my_domains'], true)) {
-        $location = $nv_Server->getOriginalProtocol() . '://' . $global_config['my_domains'][0] . $_SERVER['REQUEST_URI'];
-        if (in_array(substr(php_sapi_name(), 0, 3), ['cgi', 'fpm'], true)) {
-            header('Location: ' . $location);
-            header('Status: 301 Moved Permanently');
-        } else {
-            header('Location: ' . $location, true, 301);
-        }
-        exit(0);
+    http_response_code(500);
+    exit('No valid domain found. Please check the site configuration!');
+}
+
+$global_config['my_domains'] = array_map('trim', explode(',', strtolower($global_config['my_domains'])));
+
+// Host, giao thức, cổng của website, là giá trị mà người dùng nhìn thấy trên url
+define('NV_SERVER_NAME', $nv_Server->getOriginalHost());
+define('NV_SERVER_PROTOCOL', $nv_Server->getOriginalProtocol());
+define('NV_SERVER_PORT', $nv_Server->getOriginalPort());
+define('NV_MY_DOMAIN', $nv_Server->getOriginalDomain());
+
+// Nếu domain truy cập không đúng sẽ chuyển đến domain đúng, header mã 301
+if (!in_array(NV_SERVER_NAME, $global_config['my_domains'], true)) {
+    $location = $nv_Server->getOriginalProtocol() . '://' . $global_config['my_domains'][0] . $_SERVER['REQUEST_URI'];
+    if (in_array(substr(php_sapi_name(), 0, 3), ['cgi', 'fpm'], true)) {
+        header('Location: ' . $location);
+        header('Status: 301 Moved Permanently');
+    } else {
+        header('Location: ' . $location, true, 301);
     }
+    exit(0);
 }
 
 // The Mozilla CA certificate store in PEM format
@@ -160,14 +162,6 @@ require NV_ROOTDIR . '/includes/core/theme_functions.php';
 // IP Ban
 if (nv_is_banIp(NV_CLIENT_IP)) {
     throw new \NukeViet\Http\HttpException('Hi and Good-bye!!!', 403);
-}
-
-// Chan proxy
-if ($global_config['proxy_blocker'] != 0) {
-    $client_info['is_proxy'] = $ips::nv_check_proxy();
-    if (nv_is_blocker_proxy($client_info['is_proxy'], $global_config['proxy_blocker'])) {
-        throw new \NukeViet\Http\HttpException('ERROR: You are behind a proxy server. Please disconnect and come again!', 403);
-    }
 }
 
 if (stripos($_SERVER['PHP_SELF'], 'index.php') !== false) {

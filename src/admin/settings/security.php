@@ -16,12 +16,6 @@ if (!defined('NV_ADMIN') or !defined('NV_MAINFILE') or !defined('NV_IS_MODADMIN'
 $page_url = NV_BASE_ADMINURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name . '&amp;' . NV_OP_VARIABLE . '=' . $op;
 $page_title = $nv_Lang->getModule('security');
 
-$proxy_blocker_list = [
-    0 => $nv_Lang->getModule('proxy_blocker_0'),
-    1 => $nv_Lang->getModule('proxy_blocker_1'),
-    2 => $nv_Lang->getModule('proxy_blocker_2'),
-    3 => $nv_Lang->getModule('proxy_blocker_3')
-];
 $captcha_opts = ['', 'captcha', 'recaptcha', 'turnstile'];
 $captcha_area_list = ['a', 'l', 'r', 'm', 'p'];
 $recaptcha_vers = [2, 3];
@@ -144,10 +138,6 @@ if (defined('NV_IS_GODADMIN') and $nv_Request->isset_request('basicsave', 'post'
         'passshow_button' => $nv_Request->get_int('passshow_button', 'post', 0),
         'request_uri_check' => $nv_Request->get_title('request_uri_check', 'post', 'page')
     ];
-    $proxy_blocker = $nv_Request->get_int('proxy_blocker', 'post');
-    if (isset($proxy_blocker_list[$proxy_blocker])) {
-        $post['proxy_blocker'] = $proxy_blocker;
-    }
 
     $domains = $nv_Request->get_textarea('domains_whitelist', '', NV_ALLOWED_HTML_TAGS, true);
     $domains = explode('<br />', strip_tags($domains, '<br>'));
@@ -755,7 +745,35 @@ if ($nv_Request->isset_request('cspsave', 'post') and csrf_check($nv_Request->ge
         'nv_csp_script_nonce' => (int) $nv_Request->get_bool('nv_csp_script_nonce', 'post', false)
     ];
 
-    $sth = $db->prepare('UPDATE ' . NV_CONFIG_GLOBALTABLE . " SET config_value = :config_value WHERE lang = 'sys' AND module = 'site' AND config_name = :config_name");
+    /**
+     * Quyết định sẵn ảnh hưởng của frame-ancestors lên chức năng chống iframe,
+     * để mỗi request không phải giải mã lại nv_csp
+     * 0: không khai báo, 1: chỉ chặn, 2: có mở cho nguồn bên ngoài
+     */
+    $post['frame_ancestors'] = 0;
+    $post['frame_ancestors_hosts'] = '';
+    if (!empty($post['nv_csp_act']) and !empty($directives['frame-ancestors'])) {
+        $_fa = $directives['frame-ancestors'];
+        $_fa_hosts = empty($_fa['hosts']) ? [] : array_filter(array_map('trim', $_fa['hosts']));
+        if (!empty($_fa['none'])) {
+            $post['frame_ancestors'] = 1;
+        } elseif (!empty($_fa['all'])) {
+            $post['frame_ancestors'] = 2;
+            $post['frame_ancestors_hosts'] = '*';
+        } elseif (!empty($_fa_hosts)) {
+            $post['frame_ancestors'] = 2;
+            $post['frame_ancestors_hosts'] = implode(' ', $_fa_hosts);
+        } else {
+            // Chỉ còn 'self', tương đương X-Frame-Options SAMEORIGIN
+            $post['frame_ancestors'] = 1;
+        }
+    }
+
+    $sth = $db->prepare('INSERT INTO ' . NV_CONFIG_GLOBALTABLE . " (
+        lang, module, config_name, config_value
+    ) VALUES (
+        'sys', 'site', :config_name, :config_value
+    ) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value)");
     foreach ($post as $config_name => $config_value) {
         $sth->bindValue(':config_value', $config_value, PDO::PARAM_STR);
         $sth->bindValue(':config_name', $config_name, PDO::PARAM_STR);
@@ -988,7 +1006,6 @@ $tpl->assign('DATA', $global_config);
 $passshow_button_opts = [$nv_Lang->getModule('passshow_button_0'), $nv_Lang->getModule('passshow_button_1'), $nv_Lang->getModule('passshow_button_2'), $nv_Lang->getModule('passshow_button_3')];
 $tpl->assign('PASSSHOW_BUTTON_OPTS', $passshow_button_opts);
 $tpl->assign('ADMIN_2STEP_PROVIDERS', $admin_2step_providers);
-$tpl->assign('PROXY_BLOCKER_LIST', $proxy_blocker_list);
 
 $uri_check_values = [
     'page' => $nv_Lang->getModule('request_uri_check_page'),

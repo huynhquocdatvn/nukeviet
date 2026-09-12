@@ -119,8 +119,6 @@ class Request
 
     private $cookie_share = false;
 
-    private $set_cookie_by_options = false;
-
     private $remote_ip;
 
     private $str_referer_blocker = false;
@@ -158,12 +156,53 @@ class Request
     ];
 
     /**
+     * Các attribute có giá trị là nội dung HTML (cần lọc đệ quy qua filterTags()).
+     * VD: srcdoc của <iframe> có thể chứa HTML với event handler nguy hiểm (XSS).
+     */
+    protected $htmlContentAttributes = ['srcdoc'];
+
+    /**
+     * Các attribute có giá trị là một URL đơn lẻ.
+     *
+     * Với chúng, chỉ scheme đứng đầu giá trị mới quyết định trình duyệt có thực thi hay
+     * không, nên xét scheme theo allowlist thay vì tìm từ khóa ở mọi vị trí. Nhờ vậy
+     * "/uploads/javascript-logo.png" hay "?q=javascript" không còn bị gỡ oan.
+     *
+     * Các attribute URL nguy hiểm khác (action, formaction, data, poster, background,
+     * codebase, dynsrc, lowsrc, usemap, classid) đã nằm trong $disabledattributes nên
+     * không bao giờ đi tới bước này.
+     *
+     * Cố ý không đưa srcset vào đây: nó là danh sách URL ngăn bởi dấu phẩy nên scheme
+     * có thể nằm giữa giá trị, phải giữ phép kiểm tra chặt.
+     */
+    protected $urlValueAttributes = ['href', 'src', 'cite', 'longdesc'];
+
+    /**
+     * Các attribute có giá trị là văn bản thuần.
+     *
+     * Trình duyệt không bao giờ diễn giải chúng thành URL hay CSS nên từ khóa kiểu
+     * "javascript" trong đó chỉ là chữ. Bỏ qua phép kiểm tra scheme để không xóa oan
+     * class="javascript-highlight" hay title="Bài viết về JavaScript".
+     */
+    protected $textValueAttributes = ['title', 'alt', 'class', 'id', 'label', 'placeholder', 'summary'];
+
+    /**
      * Các attr bị cấm, sẽ bị lọc bỏ.
      * - Tất cả các arrt bắt đầu bằng on
      * - Các attr bên dưới
      */
     private $disabledattributes = [
         'action',
+        'formaction',
+        'formmethod',
+        'formenctype',
+        'formtarget',
+        'formnovalidate',
+        'poster',
+        'usemap',
+        'data',
+        'classid',
+        'referrerpolicy',
         'background',
         'codebase',
         'dynsrc',
@@ -171,22 +210,8 @@ class Request
         'allownetworking', // Control a SWF file’s access to network functionality by setting the allowNetworking parameter = internal
         'allowscriptaccess', // Loại bỏ điều khiển cho phép javascript trong embed, tự động đặt = never
         'fscommand', // attacker can use this when executed from within an embedded Flash object
-        'seeksegmenttime' // this is a method that locates the specified point on the element’s segment time line and begins playing from that point. The segment consists of one repetition of the time line including reverse play using the AUTOREVERSE attribute.
-    ];
-
-    private $disablecomannds = [
-        'base64_decode',
-        'cmd',
-        'passthru',
-        'eval',
-        'exec',
-        'system',
-        'fopen',
-        'fsockopen',
-        'file',
-        'file_get_contents',
-        'readfile',
-        'unlink'
+        'seeksegmenttime', // this is a method that locates the specified point on the element’s segment time line and begins playing from that point. The segment consists of one repetition of the time line including reverse play using the AUTOREVERSE attribute.
+        'ping' // HTML5 <a ping> sends POST to arbitrary URL on click - SSRF/tracking vector
     ];
 
     /**
@@ -267,7 +292,7 @@ class Request
         ], true)) {
             $this->SameSite = $config['cookie_SameSite'];
         }
-        $this->set_cookie_by_options = version_compare(PHP_VERSION, '7.3.0', '>=');
+
         if (!empty($config['cookie_prefix'])) {
             $this->cookie_prefix = preg_replace('/[^a-zA-Z0-9\_]+/', '', $config['cookie_prefix']);
         }
@@ -393,17 +418,17 @@ class Request
         if (defined('NV_SERVER_NAME')) {
             $this->server_name = NV_SERVER_NAME;
         } else {
-            $this->server_name = self::$Server->getServerHost();
+            $this->server_name = self::$Server->getOriginalHost();
         }
         if (defined('NV_SERVER_PROTOCOL')) {
             $this->server_protocol = NV_SERVER_PROTOCOL;
         } else {
-            $this->server_protocol = self::$Server->getServerProtocol();
+            $this->server_protocol = self::$Server->getOriginalProtocol();
         }
         if (defined('NV_SERVER_PORT')) {
             $this->server_port = NV_SERVER_PORT;
         } else {
-            $this->server_port = self::$Server->getServerPort();
+            $this->server_port = self::$Server->getOriginalPort();
         }
 
         $this->base_siteurl = $base_siteurl;
@@ -562,7 +587,7 @@ class Request
                 if (substr($ref['host'], 0, 1) == '[' and substr($ref['host'], -1) == ']') {
                     $ref['host'] = substr($ref['host'], 1, -1);
                 }
-                if (preg_match('/^' . preg_quote($ref['host'], '/') . '/', $this->server_name)) {
+                if ($ref['host'] === $this->server_name) {
                     $this->referer_key = 1;
                 } else {
                     $this->referer_key = 0;
@@ -635,21 +660,17 @@ class Request
         }
 
         $_secure = ($this->server_protocol == 'https' and $https_only) ? 1 : 0;
-        if ($this->set_cookie_by_options) {
-            $options = [
-                'lifetime' => NV_LIVE_SESSION_TIME,
-                'path' => $this->cookie_path,
-                'domain' => $this->cookie_domain,
-                'secure' => $_secure,
-                'httponly' => 1
-            ];
-            if ($this->SameSite == 'Lax' or $this->SameSite == 'Strict') {
-                $options['samesite'] = $this->SameSite;
-            }
-            session_set_cookie_params($options);
-        } else {
-            session_set_cookie_params(NV_LIVE_SESSION_TIME, $this->cookie_path, $this->cookie_domain, $_secure, 1);
+        $options = [
+            'lifetime' => NV_LIVE_SESSION_TIME,
+            'path' => $this->cookie_path,
+            'domain' => $this->cookie_domain,
+            'secure' => $_secure,
+            'httponly' => 1
+        ];
+        if ($this->SameSite == 'Lax' or $this->SameSite == 'Strict') {
+            $options['samesite'] = $this->SameSite;
         }
+        session_set_cookie_params($options);
 
         session_name($this->cookie_prefix . '_sess');
         ini_set('session.use_strict_mode', 1);
@@ -692,24 +713,82 @@ class Request
                 continue;
             }
             $attrSubSet = array_map('trim', explode('=', trim($attrSet[$i]), 2));
-            $attrSubSet[0] = strtolower($attrSubSet[0]);
 
-            if (!preg_match('/[a-z]+/i', $attrSubSet[0]) or in_array($attrSubSet[0], $this->disabledattributes, true) or preg_match('/^on/i', $attrSubSet[0])) {
+            /*
+            * Chuẩn hóa tên thuộc tính bằng cách loại bỏ các entity hex/decimal của ký tự
+            * điều khiển ASCII (0–31), kể cả khi thiếu dấu ";" ở cuối. Sau đó giải mã các
+            * entity còn lại và loại bỏ các ký tự điều khiển thực trong chuỗi.
+            *
+            * Việc này giúp ngăn các kỹ thuật che giấu tên thuộc tính bằng ký tự điều khiển
+            * nhằm vượt qua cơ chế phát hiện các thuộc tính bắt đầu bằng "on".
+            */
+            $attrSubSet[0] = strtolower($attrSubSet[0]);
+            $attrSubSet[0] = preg_replace('/&#[xX]0*(?:1[0-9a-fA-F]|[0-9a-fA-F])(?![0-9a-fA-F]);?/i', '', $attrSubSet[0]);
+            $attrSubSet[0] = preg_replace('/&#0*(?:3[01]|[12][0-9]|[0-9])(?![0-9]);?/', '', $attrSubSet[0]);
+            $attrSubSet[0] = preg_replace('/[\x00-\x20]/', '', html_entity_decode($attrSubSet[0], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+            if (!preg_match('/^[a-z][a-z0-9:._-]*$/', $attrSubSet[0])) {
+                continue;
+            }
+
+            /*
+             * Attribute bị gỡ vì lý do bảo mật (event handler on*, attribute nằm trong danh sách cấm)
+             * phải đánh dấu nội dung là không hợp lệ. Nếu không, khi filterTags() được gọi đệ quy để soi
+             * payload của srcdoc / data: URL, việc gỡ bỏ attribute nguy hiểm sẽ không được báo lên trên
+             * và attribute chứa payload vẫn được giữ nguyên.
+             */
+            if (in_array($attrSubSet[0], $this->disabledattributes, true) or preg_match('/^on/i', $attrSubSet[0])) {
+                $isvalid = false;
                 continue;
             }
 
             if (!empty($attrSubSet[1])) {
                 $attrSubSet[1] = preg_replace('/[ ]+/', ' ', $attrSubSet[1]);
-                $attrSubSet[1] = preg_replace('/^"(.*)"$/', '\\1', $attrSubSet[1]);
-                $attrSubSet[1] = preg_replace("/^\'(.*)\'$/", '\\1', $attrSubSet[1]);
+                $attrSubSet[1] = preg_replace('/^"(.*)"$/s', '\\1', $attrSubSet[1]);
+                $attrSubSet[1] = preg_replace("/^\'(.*)\'$/s", '\\1', $attrSubSet[1]);
                 $attrSubSet[1] = str_replace(['"', '&quot;'], "'", $attrSubSet[1]);
 
-                $value = Site::unhtmlentities($attrSubSet[1]);
+                // Là thứ trình duyệt sẽ đọc. Dùng khi cần lọc rồi ghi ngược ra HTML
+                $browserValue = Sanitizer::canonicalize($attrSubSet[1]);
+
+                // Đã bóc mọi lớp che giấu. Chỉ dùng để ra quyết định chặn/không chặn
+                $value = Sanitizer::deobfuscate($attrSubSet[1]);
+
+                /*
+                 * Lọc đệ quy attribute có giá trị là nội dung HTML (VD: srcdoc của iframe)
+                 */
+                if (in_array($attrSubSet[0], $this->htmlContentAttributes, true)) {
+                    $htmlValid = true;
+                    $filteredHtml = $this->filterTags($browserValue, $htmlValid);
+                    if (!$htmlValid) {
+                        $isvalid = false;
+                    }
+                    $attrSubSet[1] = htmlspecialchars($filteredHtml, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $newSet[] = $attrSubSet[0] . '=[@{' . $attrSubSet[1] . '}@]';
+                    continue;
+                }
 
                 // Security check Data URLs
                 if (preg_match('/^[\r\n\s\t]*d\s*a\s*t\s*a\s*\:([^\,]*?)\;*[\r\n\s\t]*(base64)*?[\r\n\s\t]*\,[\r\n\s\t]*(.*?)[\r\n\s\t]*$/isu', $value, $m)) {
+                    $dataMime = explode(';', $m[1], 2);
+                    $dataMime = strtolower(preg_replace('/[\x00-\x20]/', '', $dataMime[0]));
+
+                    if ('image/svg+xml' === $dataMime) {
+                        if (!in_array($tagName, ['img', 'source', 'video', 'audio', 'track'], true)) {
+                            continue;
+                        }
+                    } elseif (!preg_match('#^(?:image|video|audio|font)/[a-z0-9.+-]+$#', $dataMime)) {
+                        continue;
+                    }
+
                     if (empty($m[2])) {
-                        $dataURLs = urldecode($m[3]);
+                        /*
+                         * Browser giải mã HTML entity của attribute value trước khi diễn giải data: URL,
+                         * nên payload phải được giải mã giống hệt trước khi đem đi lọc. Nếu chỉ urldecode(),
+                         * payload dạng "data:text/html,&lt;script&gt;..." sẽ không có tag nào cho filterTags()
+                         * nhìn thấy và attribute độc hại được giữ nguyên (cùng cách xử lý với srcdoc ở trên).
+                         */
+                        $dataURLs = html_entity_decode(urldecode($m[3]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
                     } else {
                         $dataURLs = (string) base64_decode($m[3], true);
                     }
@@ -717,27 +796,18 @@ class Request
                     $checkValid = true;
                     $this->filterTags($dataURLs, $checkValid);
                     if (!$checkValid) {
+                        $isvalid = false;
                         continue;
                     }
                 }
 
                 if (preg_match('/\<\s*s\s*c\s*r\s*i\s*p\s*t([^\>]*)\>(.*)\<\s*\/\s*s\s*c\s*r\s*i\s*p\s*t\s*\>/isU', $value)) {
+                    $isvalid = false;
                     continue;
                 }
 
-                $search = [
-                    'javascript' => '/j\s*a\s*v\s*a\s*s\s*c\s*r\s*i\s*p\s*t/si',
-                    'vbscript' => '/v\s*b\s*s\s*c\s*r\s*i\s*p\s*t/si',
-                    'script' => '/s\s*c\s*r\s*i\s*p\s*t/si',
-                    'applet' => '/a\s*p\s*p\s*l\s*e\s*t/si',
-                    'alert' => '/a\s*l\s*e\s*r\s*t/si',
-                    'document' => '/d\s*o\s*c\s*u\s*m\s*e\s*n\s*t/si',
-                    'write' => '/w\s*r\s*i\s*t\s*e/si',
-                    'cookie' => '/c\s*o\s*o\s*k\s*i\s*e/si',
-                    'window' => '/w\s*i\s*n\s*d\s*o\s*w/si',
-                    'data:' => '/d\s*a\s*t\s*a\s*\:/si'
-                ];
-                $value = preg_replace(array_values($search), array_keys($search), $value);
+                // Gom các từ khóa nguy hiểm bị giãn cách ký tự (dùng chung với Sanitizer)
+                $value = Sanitizer::normalizeXssKeywords($value);
 
                 // Giới hạn link từ các tên miền bên ngoài
                 if ($this->isRestrictDomain and isset($this->remoteAttrCheck[$attrSubSet[0]]) and in_array($tagName, $this->remoteAttrCheck[$attrSubSet[0]], true)) {
@@ -757,27 +827,18 @@ class Request
                 if ('param' == $tagName and 'name' == $attrSubSet[0] and preg_match('/^[\r\n\s\t]*(allowscriptaccess|allownetworking)/isu', strtolower($value))) {
                     return [];
                 }
-                if (preg_match('/(expression|javascript|behaviour|vbscript|mocha|livescript)(\:*)/', $value)) {
-                    continue;
-                }
-                if (!empty($this->disablecomannds) and preg_match('#(' . implode('|', $this->disablecomannds) . ')(\s*)\((.*?)\)#si', $value)) {
-                    continue;
+                // Kiểm tra nghiêm theo vai trò của attribute
+                if (in_array($attrSubSet[0], $this->textValueAttributes, true)) {
+                    $hasDangerousValue = false;
+                } elseif (in_array($attrSubSet[0], $this->urlValueAttributes, true)) {
+                    $hasDangerousValue = Sanitizer::hasDangerousUrlScheme($value);
+                } else {
+                    $hasDangerousValue = Sanitizer::hasDangerousScheme($value);
                 }
 
-                if ('href' != $attrSubSet[0]) {
-                    $attrSubSet[1] = preg_replace_callback('/\#([0-9ABCDEFabcdef]{3,6})[\;]*/', function ($hex) {
-                        if (preg_match('/[^0-9ABCDEFabcdef]/', $hex[1])) {
-                            return $hex[0];
-                        }
-                        $color = $hex[1];
-                        $l = strlen($color);
-                        if ($l != 3 and $l != 6) {
-                            return $hex[0];
-                        }
-                        $l /= 3;
-
-                        return 'rgb(' . (hexdec(substr($color, 0, 1 * $l))) . ', ' . (hexdec(substr($color, 1 * $l, 1 * $l))) . ', ' . (hexdec(substr($color, 2 * $l, 1 * $l))) . ');';
-                    }, $attrSubSet[1]);
+                if ($hasDangerousValue or Sanitizer::hasDisabledCommand($value)) {
+                    $isvalid = false;
+                    continue;
                 }
             } elseif ($attrSubSet[1] !== '0') {
                 $attrSubSet[1] = $attrSubSet[0];
@@ -943,12 +1004,12 @@ class Request
                 }
 
                 $value = str_replace(["\t", "\r", "\n", '../'], '', $value);
-                $value = Site::unhtmlentities($value);
+                $value = Sanitizer::canonicalize($value);
                 unset($matches);
                 preg_match_all('/<!\[cdata\[(.*?)\]\]>/is', $value, $matches);
                 $value = str_replace($matches[0], $matches[1], $value);
                 $value = strip_tags($value);
-                $value = preg_replace('#(' . implode('|', $this->disablecomannds) . ')(\s*)\((.*?)\)#si', '', $value);
+                $value = preg_replace('#(' . implode('|', Sanitizer::DISABLE_COMMANDS) . ')(\s*)\((.*?)\)#si', '', $value);
                 $value = str_replace(["'", '"', '<', '>'], ['&#039;', '&quot;', '&lt;', '&gt;'], $value);
                 $value = trim($value);
             }
@@ -1026,40 +1087,72 @@ class Request
     }
 
     /**
-     * encodeCookie()
+     * encryptData()
      *
      * @param array|string $string
      * @return string
      */
-    private function encodeCookie($string)
+    private function encryptData($string)
     {
         $prefix = '';
         if (is_array($string)) {
             $string = json_encode($string, NV_JSON_ENCODE);
             $prefix = 'jsn.';
         }
-        $iv = substr($this->cookie_key, 0, 16);
-        $string = openssl_encrypt($string, 'aes-256-cbc', $this->cookie_key, 0, $iv);
 
-        return $prefix . strtr($string, '+/=', '-_,');
+        if (function_exists('random_bytes')) {
+            $iv = random_bytes(16);
+        } elseif (function_exists('openssl_random_pseudo_bytes')) {
+            $iv = openssl_random_pseudo_bytes(16, $crypto_strong);
+            if ($iv === false || !$crypto_strong) {
+                $iv = hash_hmac('sha256', uniqid(mt_rand(), true), $this->cookie_key, true);
+                $iv = substr($iv, 0, 16);
+            }
+        } else {
+            $iv = hash_hmac('sha256', uniqid(mt_rand(), true), $this->cookie_key, true);
+            $iv = substr($iv, 0, 16);
+        }
+
+        $ciphertext = openssl_encrypt($string, 'aes-256-cbc', $this->cookie_key, OPENSSL_RAW_DATA, $iv);
+        if ($ciphertext === false) {
+            return '';
+        }
+
+        $hmac = hash_hmac('sha256', $iv . $ciphertext, $this->cookie_key, true);
+        $packed = $hmac . $iv . $ciphertext;
+
+        return $prefix . strtr(base64_encode($packed), '+/=', '-_,');
     }
 
     /**
-     * decodeCookie()
+     * decryptData()
      *
      * @param string $string
      * @return array|false|string
      */
-    private function decodeCookie($string)
+    private function decryptData($string)
     {
         $isJsonDecode = false;
         if (substr($string, 0, 4) == 'jsn.') {
             $string = substr($string, 4);
             $isJsonDecode = true;
         }
-        $string = strtr($string, '-_,', '+/=');
-        $iv = substr($this->cookie_key, 0, 16);
-        $string = openssl_decrypt($string, 'aes-256-cbc', $this->cookie_key, 0, $iv);
+
+        $packed = base64_decode(strtr($string, '-_,', '+/='));
+        if ($packed === false || strlen($packed) < 48) {
+            return false;
+        }
+
+        $hmac = substr($packed, 0, 32);
+        $iv = substr($packed, 32, 16);
+        $ciphertext = substr($packed, 48);
+
+        $calculated_hmac = hash_hmac('sha256', $iv . $ciphertext, $this->cookie_key, true);
+        if (!hash_equals($hmac, $calculated_hmac)) {
+            return false;
+        }
+
+        $string = openssl_decrypt($ciphertext, 'aes-256-cbc', $this->cookie_key, OPENSSL_RAW_DATA, $iv);
         if ($isJsonDecode) {
             return json_decode($string, true);
         }
@@ -1107,7 +1200,7 @@ class Request
                     if (array_key_exists($this->cookie_prefix . '_' . $name, $_COOKIE)) {
                         $value = $_COOKIE[$this->cookie_prefix . '_' . $name];
                         if ($decode) {
-                            $value = $this->decodeCookie($value);
+                            $value = $this->decryptData($value);
                         }
                         if (empty($value) or is_numeric($value)) {
                             return $value;
@@ -1185,32 +1278,28 @@ class Request
         }
         $name = $this->cookie_prefix . '_' . $name;
         if ($encode) {
-            $value = $this->encodeCookie($value);
+            $value = $this->encryptData($value);
         }
         $expire = (int) $expire;
         if (!empty($expire)) {
             $expire += NV_CURRENTTIME;
         }
 
-        if ($this->set_cookie_by_options) {
-            $options = [
-                'expires' => $expire,
-                'path' => $this->cookie_path,
-                'domain' => $this->cookie_domain,
-                'secure' => $this->secure,
-                'httponly' => $this->httponly
-            ];
-            if (!empty($this->SameSite) and (in_array($this->SameSite, [
-                'Lax',
-                'Strict'
-            ], true) or ($this->SameSite == 'None' and !empty($this->secure)))) {
-                $options['samesite'] = $this->SameSite;
-            }
-
-            return setcookie($name, $value, $options);
+        $options = [
+            'expires' => $expire,
+            'path' => $this->cookie_path,
+            'domain' => $this->cookie_domain,
+            'secure' => $this->secure,
+            'httponly' => $this->httponly
+        ];
+        if (!empty($this->SameSite) and (in_array($this->SameSite, [
+            'Lax',
+            'Strict'
+        ], true) or ($this->SameSite == 'None' and !empty($this->secure)))) {
+            $options['samesite'] = $this->SameSite;
         }
 
-        return setcookie($name, $value, $expire, $this->cookie_path, $this->cookie_domain, $this->secure, $this->httponly);
+        return setcookie($name, $value, $options);
     }
 
     /**

@@ -70,8 +70,20 @@ $global_config['crossadmin_restrict'] = 1;
 $global_config['crosssite_restrict'] = 1;
 $global_config['domains_restrict'] = 1;
 
-$global_config['proxy_blocker'] = 0;
 $global_config['str_referer_blocker'] = 0;
+
+/*
+ * Proxy tin cậy: chỉ tin các header IP do proxy đặt (X-Forwarded-For, CF-Connecting-IP...)
+ * khi IP kết nối trực tiếp (REMOTE_ADDR) thuộc danh sách dưới đây.
+ * Danh sách gồm dải mạng nội bộ (reverse proxy chạy cùng máy hoặc cùng LAN) và dải IP của Cloudflare.
+ *
+ * Lưu ý: dải IP Cloudflare thay đổi theo thời gian, danh sách dưới đây có thể outdate.
+ * Nguồn chính thức: https://www.cloudflare.com/ips/
+ * Sau khi cài đặt xong, hãy cập nhật lại bằng nút "Lấy dải IP Cloudflare" trong
+ * Quản trị > Cấu hình > Quản lý proxy tin cậy.
+ */
+$global_config['trusted_proxies'] = ['127.0.0.0/8', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', 'fc00::/7', '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22', '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32', '2a06:98c0::/29', '2c0f:f248::/32'];
+$global_config['trusted_proxy_enable'] = 1;
 
 $global_config['lang_multi'] = 1;
 $global_config['lang_geo'] = 0;
@@ -89,8 +101,8 @@ $global_config['nv_upass_type'] = 3;
 // Thời gian lặp lại việc sao lưu CSDL tính bằng ngày
 $global_config['dump_interval'] = 1;
 
-//hashprefix: support LDAP({SSHA512}, {SSHA256}, {SSHA}, {SHA}, {MD5}); {NV3}
-$global_config['hashprefix'] = '{SSHA512}';
+//hashprefix: support LDAP({CRYPT}, {SSHA512}, {SSHA256}, {SSHA}, {SHA}, {MD5}); {NV3}
+$global_config['hashprefix'] = '{CRYPT}';
 
 //so ky tu toi da cua password doi voi user
 $global_config['nv_upassmax'] = 32;

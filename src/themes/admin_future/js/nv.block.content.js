@@ -12,6 +12,42 @@
 $(function() {
     let form = $('#block-content-form');
 
+    // Select2 hiển thị tên block + helper tên file gốc trong dropdown
+    function formatBlockFileResult(option) {
+        if (!option.id) return option.text;
+        let filename = $(option.element).data('filename');
+        if (!filename) return option.text;
+        let $el = $('<span class="d-block">');
+        $('<span class="d-block">').text(option.text).attr('title', option.text).appendTo($el);
+        $('<small class="d-block text-muted text-truncate">').text(filename).attr('title', filename).appendTo($el);
+        return $el;
+    }
+
+    function formatBlockFileSelection(option) {
+        if (!option.id) return option.text;
+        let filename = $(option.element).data('filename');
+        if (!filename) return option.text;
+        let $el = $('<span class="d-block text-truncate">').attr('title', option.text + ' (' + filename + ')');
+        $('<span>').text(option.text).appendTo($el);
+        $('<small class="text-muted ms-2 fst-italic">').text('(' + filename + ')').appendTo($el);
+        return $el;
+    }
+
+    function initBlockFileSelect2() {
+        let $sel = $('[name="file_name"]', form);
+        if (!$.fn.select2) return;
+        if ($sel.data('select2')) {
+            $sel.select2('destroy');
+        }
+        $sel.select2({
+            width: '100%',
+            dropdownCssClass: 'select2-block-file-dd',
+            templateResult: formatBlockFileResult,
+            templateSelection: formatBlockFileSelection
+        });
+    }
+    initBlockFileSelect2();
+
     // Thôi thêm/sửa block
     $('[data-toggle="closeWindow"]', form).on('click', function() {
         window.close();
@@ -22,6 +58,7 @@ $(function() {
         let btn = $(this);
         let module = btn.val();
         $('[name="file_name"]', form).html('<option value="">' + $('[name="file_name"]', form).data('default') + '</option>');
+        initBlockFileSelect2();
         $('#block_config').html('').addClass('d-none');
         if (module == '') {
             $('.funclist', form).addClass('d-none');
@@ -35,7 +72,7 @@ $(function() {
             type: 'POST',
             url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=' + nv_func_name + '&nocache=' + new Date().getTime(),
             data: {
-                checkss: $('body').data('checksess'),
+                checkss: form.data('checkss'),
                 loadBlocks: module,
                 bid: $('[name="bid"]', form).val()
             },
@@ -49,6 +86,7 @@ $(function() {
                     return;
                 }
                 $('[name="file_name"]', form).html(res.html);
+                initBlockFileSelect2();
             },
             error: function(xhr, text, err) {
                 $('[name="file_name"]', form).prop('disabled', false);
@@ -109,7 +147,7 @@ $(function() {
                 type: 'POST',
                 url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=block_config&nocache=' + new Date().getTime(),
                 data: {
-                    checkss: $('body').data('checksess'),
+                    checkss: form.data('checkss'),
                     bid: $('[name="bid"]', form).val(),
                     module: module_type,
                     selectthemes: form.data('selectthemes'),
@@ -219,7 +257,7 @@ $(function() {
             type: 'POST',
             url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=' + nv_module_name + '&' + nv_fc_variable + '=' + nv_func_name + '&nocache=' + new Date().getTime(),
             data: {
-                checkss: $('body').data('checksess'),
+                checkss: form.data('checkss'),
                 get_dtime_details: dtime,
                 bid: $('[name="bid"]', form).val()
             },

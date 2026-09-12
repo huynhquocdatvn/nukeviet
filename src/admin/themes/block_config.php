@@ -20,7 +20,9 @@ $respon = [
     'error' => 1,
     'text' => 'Wrong session!!!'
 ];
-if ($nv_Request->get_title('checkss', 'post', '') !== NV_CHECK_SESSION) {
+$content_csrf_key = $admin_info['admin_id'] . '_' . $module_name . '_block_content';
+
+if (!csrf_check($nv_Request->get_string('checkss', 'post'), $content_csrf_key)) {
     nv_jsonOutput($respon);
 }
 
@@ -49,9 +51,9 @@ if ($module == 'theme' and (preg_match($global_config['check_theme'], $selectthe
 
     // Cho phép lấy cả block trong giao diện
     $checks = [
-        'php' => NV_ROOTDIR . '/themes/' . $global_config['site_theme'] . '/modules/' . $module_file . '/' . $file_name,
-        'ini' => NV_ROOTDIR . '/themes/' . $global_config['site_theme'] . '/modules/' . $module_file . '/' . $matches[1] . '.' . $matches[2] . '.ini',
-        'json' => NV_ROOTDIR . '/themes/' . $global_config['site_theme'] . '/modules/' . $module_file . '/' . $matches[1] . '.' . $matches[2] . '.json'
+        'php' => NV_ROOTDIR . '/themes/' . $selectthemes . '/modules/' . $module_file . '/' . $file_name,
+        'ini' => NV_ROOTDIR . '/themes/' . $selectthemes . '/modules/' . $module_file . '/' . $matches[1] . '.' . $matches[2] . '.ini',
+        'json' => NV_ROOTDIR . '/themes/' . $selectthemes . '/modules/' . $module_file . '/' . $matches[1] . '.' . $matches[2] . '.json'
     ];
     foreach ($checks as $check_type => $path) {
         if (!file_exists($path)) {

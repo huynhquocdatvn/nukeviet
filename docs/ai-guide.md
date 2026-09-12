@@ -73,14 +73,14 @@ Antigravity sử dụng `.agents` folder. Tạo symlink/junction từ `.claude`:
 ```cmd
 cd d:\nukeviet\
 mklink /J ".agents" ".claude"
-mklink /H "ANTIGRAVITY.md" "CLAUDE.md"
+mklink /H "AGENTS.md" "CLAUDE.md"
 ```
 
 #### Linux/macOS
 ```bash
 cd /path/to/nukeviet
 ln -sf ".claude" ".agents"
-ln "CLAUDE.md" "ANTIGRAVITY.md"
+ln "CLAUDE.md" "AGENTS.md"
 ```
 
 ### Cách sử dụng
@@ -116,7 +116,6 @@ Skills và Project Instructions tương thích với Claude nên không cần l�
 ### Best Practices
 
 - **Luôn backup** code trước khi chạy skill lớn
-- **Xóa cache** sau khi thay đổi cấu trúc: `rm -rf src/data/cache/*/*.cache`
 - **Kiểm tra syntax:** `php -l filename.php`
 - **Test bảo mật:** Dùng `/security-audit` trước khi commit
 - **Đọc changelog:** Khi upgrade module/theme

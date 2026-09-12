@@ -93,7 +93,7 @@ $sender = $array_op[1] ?? '';
 if ($sender == 'facebook') {
     /**
      * @param mixed $code
-     * @return never
+     * @return void
      */
     function jsonConfirmSuccess($code)
     {
@@ -127,7 +127,7 @@ if ($sender == 'facebook') {
 
     // Kiểm tra chữ ký
     $expected_sig = hash_hmac('sha256', $payload, $global_config['facebook_client_secret'], true);
-    if ($sig !== $expected_sig) {
+    if (!hash_equals($expected_sig, $sig)) {
         http_response_code(400);
         nv_jsonOutput([
             'error' => 'invalid_signature',
@@ -240,7 +240,7 @@ if ($sender == 'facebook') {
             ]);
         }
 
-        nv_insert_logs(NV_LANG_DATA, $module_name, 'unlink_oauth_account', ' Client IP:' . NV_CLIENT_IP, $row['userid']);
+        nv_insert_logs(NV_LANG_DATA, $module_name, 'unlink_oauth_account', '', $row['userid']);
     } else {
         // Xóa toàn bộ tài khoản
         setPendingDeletion($row);
@@ -328,7 +328,7 @@ if (!empty($user_info['delete_at'])) {
         if (!hash_equals($checkss, $array['checkss'])) {
             $array['error'] = 'Wrong session!!!';
         } else {
-            nv_insert_logs(NV_LANG_DATA, $module_name, 'cancel_request_deletion', ' Client IP:' . NV_CLIENT_IP, $user_info['userid']);
+            nv_insert_logs(NV_LANG_DATA, $module_name, 'cancel_request_deletion', '', $user_info['userid']);
 
             $sql = "UPDATE " . NV_MOD_TABLE . " SET delete_at=0 WHERE userid=" . $user_info['userid'];
             $db->query($sql);
@@ -493,7 +493,7 @@ if (!empty($array['verification_code'])) {
         $array['estimated_time'] = NV_CURRENTTIME + (10 * 86400);
         $array['estimated_time_show'] = nv_datetime_format($array['estimated_time'], 1);
 
-        nv_insert_logs(NV_LANG_DATA, $module_name, 'manual_request_deletion', ' Client IP:' . NV_CLIENT_IP, $user_info['userid']);
+        nv_insert_logs(NV_LANG_DATA, $module_name, 'manual_request_deletion', '', $user_info['userid']);
         setPendingDeletion($array);
 
         $sql = "INSERT INTO " . NV_MOD_TABLE . "_deleted (

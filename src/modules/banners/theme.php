@@ -14,63 +14,29 @@ if (!defined('NV_SYSTEM')) {
 }
 
 /**
- * nv_banner_theme_main()
+ * Giao diện chính của module
  *
- * @param array $contents
- * @param mixed $manament
+ * @param array $array
  * @return string
  */
-function nv_banner_theme_main($contents)
+function nv_banner_theme_main($array)
 {
-    global $module_info, $manament, $nv_Lang, $global_array_uplans, $language_array;
+    global $module_name, $manament, $nv_Lang, $language_array;
 
-    $xtpl = new XTemplate('home.tpl', get_module_tpl_dir('home.tpl'));
-    $xtpl->assign('LANG', \NukeViet\Core\Language::$lang_module);
-    $xtpl->assign('GLANG', \NukeViet\Core\Language::$lang_global);
+    $tpl = new \NukeViet\Template\NVSmarty();
+    $tpl->setTemplateDir(get_module_tpl_dir('main.tpl'));
 
-    if (!empty($contents)) {
-        $xtpl->assign('MAIN_PAGE_INFO', $nv_Lang->getModule('main_page_info'));
-        $xtpl->parse('main.if_banner_plan.info');
+    $tpl->assign('LANG', $nv_Lang);
+    $tpl->assign('MODULE_NAME', $module_name);
+    $tpl->assign('MANAGEMENT', $manament);
+    $tpl->assign('LANGUAGE_ARRAY', $language_array);
+    $tpl->assign('ARRAY', $array);
 
-        foreach ($contents as $row) {
-            $xtpl->clear_autoreset();
-            $xtpl->assign('PLAN_TITLE', $row['title']);
-            $xtpl->assign('PLAN_LANG_NAME', ((!empty($row['blang'])) ? $language_array[$row['blang']]['name'] : $nv_Lang->getModule('blang_all')));
-            $xtpl->assign('PLAN_SIZE_NAME', $row['width'] . ' x ' . $row['height'] . 'px');
-            $xtpl->assign('PLAN_FORM_NAME', ($nv_Lang->existsModule('form_' . $row['form']) ? $nv_Lang->getModule('form_' . $row['form']) : $row['form']));
-            $xtpl->assign('PLAN_DESCRIPTION_NAME', $row['description']);
-            $xtpl->assign('PLAN_DETAIL', $nv_Lang->getGlobal('detail'));
-            $xtpl->set_autoreset();
-            if (isset($global_array_uplans[$row['id']])) {
-                $xtpl->parse('main.if_banner_plan.banner_plan.allowed');
-            } else {
-                $xtpl->parse('main.if_banner_plan.banner_plan.notallowed');
-            }
-            if (!empty($row['description'])) {
-                $xtpl->parse('main.if_banner_plan.banner_plan.desc');
-            }
-            $xtpl->parse('main.if_banner_plan.banner_plan');
-        }
-
-        $xtpl->parse('main.if_banner_plan');
-    }
-
-    if (defined('NV_IS_BANNER_CLIENT')) {
-        $xtpl->assign('MANAGEMENT', $manament);
-        $xtpl->parse('main.management');
-    } elseif (!defined('NV_IS_USER')) {
-        $xtpl->parse('main.login_check');
-    } else {
-        $xtpl->parse('main.no_permission');
-    }
-
-    $xtpl->parse('main');
-
-    return $xtpl->text('main');
+    return $tpl->fetch('main.tpl');
 }
 
 /**
- * nv_banner_theme_addads()
+ * Giao diện thêm quảng cáo
  *
  * @param array  $global_array_uplans
  * @param string $page_url
@@ -78,73 +44,50 @@ function nv_banner_theme_main($contents)
  */
 function nv_banner_theme_addads($global_array_uplans, $page_url)
 {
-    global $global_config, $module_info, $module_captcha, $nv_Lang, $lang_array, $manament;
+    global $module_name, $nv_Lang, $lang_array, $manament;
 
-    $xtpl = new XTemplate('addads.tpl', get_module_tpl_dir('addads.tpl'));
-    $xtpl->assign('LANG', \NukeViet\Core\Language::$lang_module);
-    $xtpl->assign('GLANG', \NukeViet\Core\Language::$lang_global);
-    $xtpl->assign('FORM_ACTION', $page_url);
+    $tpl = new \NukeViet\Template\NVSmarty();
+    $tpl->setTemplateDir(get_module_tpl_dir('addads.tpl'));
 
-    $xtpl->assign('MANAGEMENT', $manament);
-    $xtpl->parse('main.management');
-
+    $plans = [];
     foreach ($global_array_uplans as $row) {
         $row['title'] .= ' (' . (empty($row['blang']) ? $nv_Lang->getModule('addads_block_lang_all') : $lang_array[$row['blang']]) . ')';
-        $row['typeimage'] = $row['require_image'] ? 'true' : 'false';
+        $row['typeimage'] = (bool) $row['require_image'];
         $row['uploadtype'] = str_replace(',', ', ', $row['uploadtype']);
-        $xtpl->assign('blockitem', $row);
-        $xtpl->parse('main.blockitem');
+        $plans[] = $row;
     }
 
-    // Nếu dùng reCaptcha v3
-    if ($module_captcha == 'recaptcha' and $global_config['recaptcha_ver'] == 3) {
-        $xtpl->parse('main.recaptcha3');
-    }
-    // Nếu dùng reCaptcha v2
-    elseif ($module_captcha == 'recaptcha' and $global_config['recaptcha_ver'] == 2) {
-        $xtpl->assign('N_CAPTCHA', $nv_Lang->getGlobal('securitycode1'));
-        $xtpl->assign('RECAPTCHA_ELEMENT', 'recaptcha' . nv_genpass(8));
-        $xtpl->parse('main.recaptcha');
-    } elseif ($module_captcha == 'turnstile') {
-        $xtpl->parse('main.turnstile');
-    } elseif ($module_captcha == 'captcha') {
-        $xtpl->assign('N_CAPTCHA', $nv_Lang->getGlobal('securitycode'));
-        $xtpl->parse('main.captcha');
-    }
+    $current_plan = !empty($plans) ? $plans[0] : ['id' => 0, 'typeimage' => false];
 
-    $xtpl->parse('main');
+    $tpl->assign('LANG', $nv_Lang);
+    $tpl->assign('MODULE_NAME', $module_name);
+    $tpl->assign('FORM_ACTION', $page_url);
+    $tpl->assign('MANAGEMENT', $manament);
+    $tpl->assign('PLANS', $plans);
+    $tpl->assign('CURRENT_PLAN', $current_plan);
+    $tpl->assign('CAPTCHA_ATTRS', nv_captcha_form_attrs('captcha'));
 
-    return $xtpl->text('main');
+    return $tpl->fetch('addads.tpl');
 }
 
 /**
- * nv_banner_theme_stats()
+ * Giao diện thống kê quảng cáo
  *
  * @param array $ads
  * @return string
  */
 function nv_banner_theme_stats($ads)
 {
-    global $module_info, $manament;
+    global $module_name, $nv_Lang, $manament;
 
-    $xtpl = new XTemplate('stats.tpl', get_module_tpl_dir('stats.tpl'));
-    $xtpl->assign('LANG', \NukeViet\Core\Language::$lang_module);
-    $xtpl->assign('GLANG', \NukeViet\Core\Language::$lang_global);
-    $xtpl->assign('MANAGEMENT', $manament);
-    $xtpl->parse('main.management');
+    $tpl = new \NukeViet\Template\NVSmarty();
+    $tpl->setTemplateDir(get_module_tpl_dir('stats.tpl'));
 
-    if (!empty($ads)) {
-        foreach ($ads as $row) {
-            $xtpl->assign('ads', $row);
-            $xtpl->parse('main.ads');
-        }
-    }
+    $tpl->assign('LANG', $nv_Lang);
+    $tpl->assign('MODULE_NAME', $module_name);
+    $tpl->assign('MANAGEMENT', $manament);
+    $tpl->assign('ADS', $ads);
+    $tpl->assign('MONTHS', range(1, 12));
 
-    for ($i = 1; $i <= 12; ++$i) {
-        $xtpl->assign('month', $i);
-        $xtpl->parse('main.month');
-    }
-
-    $xtpl->parse('main');
-    return $xtpl->text('main');
+    return $tpl->fetch('stats.tpl');
 }

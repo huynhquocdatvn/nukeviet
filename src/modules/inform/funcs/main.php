@@ -22,7 +22,10 @@ $u_groups = array_unique(array_filter(array_map(function ($gr) {
     return $gr >= 10 ? (int) $gr : 0;
 }, $user_info['in_groups'])));
 
-// Khu vực quản lý thông báo của trưởng nhóm
+/**
+ * Khu vực quản lý thông báo của trưởng nhóm
+ * Truy cập từ khu vực users/groups/ID/ ngoài site
+ */
 if ($nv_Request->isset_request('manager', 'get')) {
     $group_id = $nv_Request->get_int('manager', 'get', 0);
 
@@ -398,7 +401,7 @@ if ($nv_Request->isset_request('manager', 'get')) {
         if (!empty($row['exp_time'])) {
             $row['exp_time_format'] = nv_datetime_format($row['exp_time']);
             if ($row['exp_time'] < NV_CURRENTTIME) {
-                $row['exp_time_format'] .= '<br/>' . $nv_Lang->getModule('to_be_removed') . '<br/>' . (nv_datetime_format(($row['exp_time'] + $global_config['inform_exp_del'])));
+                $row['exp_time_format'] .= '<br/>' . $nv_Lang->getModule('to_be_removed') . '<br/>' . (nv_datetime_format(intval($row['exp_time'] + $global_config['inform_exp_del'])));
             }
         } else {
             $row['exp_time_format'] = $nv_Lang->getModule('unlimited');
@@ -505,10 +508,10 @@ if ($nv_Request->isset_request('setStatus', 'post')) {
 
         $sth = $db->prepare('SELECT mtb.id, IFNULL(jtb.shown_time, 0) AS shown_time, IFNULL(jtb.viewed_time, 0) AS viewed_time, IFNULL(jtb.favorite_time, 0) AS favorite_time, IFNULL(jtb.hidden_time, 0) AS hidden_time
             FROM ' . NV_INFORM_GLOBALTABLE . ' AS mtb
-            LEFT JOIN ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS jtb ON (jtb.pid = mtb.id AND jtb.userid = :userid)
+            LEFT JOIN ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS jtb ON (jtb.pid = mtb.id AND jtb.userid = :jtb_userid)
             WHERE ' . $where_str . ' AND mtb.id = :id');
         $sth->bindValue(':id', $id, PDO::PARAM_INT);
-        $sth->bindValue(':userid', $user_info['userid'], PDO::PARAM_INT);
+        $sth->bindValue(':jtb_userid', $user_info['userid'], PDO::PARAM_INT);
         foreach ($params as $key => $val) {
             $sth->bindValue($key, $val[0], $val[1]);
         }
@@ -565,18 +568,39 @@ if (defined('NV_IS_AJAX') or $nv_Request->isset_request('ajax', 'get')) {
 
     if (is_null($num_items)) {
         $where_inform = $where_str;
+        $add_param = false;
         if ($filter == 'unviewed') {
-            $where_inform .= ' AND NOT EXISTS (SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc WHERE exc.pid = mtb.id AND exc.userid = :userid AND (exc.viewed_time != 0 OR exc.hidden_time != 0))';
+            $where_inform .= ' AND NOT EXISTS (
+                SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc
+                WHERE exc.pid = mtb.id AND exc.userid = :exc_userid AND (
+                    exc.viewed_time != 0 OR exc.hidden_time != 0
+                )
+            )';
+            $add_param = true;
         } elseif ($filter == 'favorite') {
-            $where_inform .= ' AND EXISTS (SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc WHERE exc.pid = mtb.id AND exc.userid = :userid AND (exc.favorite_time != 0 AND exc.hidden_time = 0))';
+            $where_inform .= ' AND EXISTS (
+                SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc
+                WHERE exc.pid = mtb.id AND exc.userid = :exc_userid AND (
+                    exc.favorite_time != 0 AND exc.hidden_time = 0
+                )
+            )';
+            $add_param = true;
         } elseif ($filter == 'hidden') {
-            $where_inform .= ' AND EXISTS (SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc WHERE exc.pid = mtb.id AND exc.userid = :userid AND exc.hidden_time != 0)';
+            $where_inform .= ' AND EXISTS (
+                SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc
+                WHERE exc.pid = mtb.id AND exc.userid = :exc_userid AND exc.hidden_time != 0
+            )';
+            $add_param = true;
         } else {
-            $where_inform .= ' AND NOT EXISTS (SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc WHERE exc.pid = mtb.id AND exc.userid = :userid AND exc.hidden_time != 0)';
+            $where_inform .= ' AND NOT EXISTS (
+                SELECT 1 FROM ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS exc
+                WHERE exc.pid = mtb.id AND exc.userid = :exc_userid AND exc.hidden_time != 0
+            )';
+            $add_param = true;
         }
+        $add_param && $params[':exc_userid'] = [$user_info['userid'], PDO::PARAM_INT];
 
         $sth = $db->prepare('SELECT COUNT(*) FROM ' . NV_INFORM_GLOBALTABLE . ' AS mtb WHERE ' . $where_inform);
-        $sth->bindValue(':userid', $user_info['userid'], PDO::PARAM_INT);
         foreach ($params as $key => $val) {
             $sth->bindValue($key, $val[0], $val[1]);
         }
@@ -587,16 +611,16 @@ if (defined('NV_IS_AJAX') or $nv_Request->isset_request('ajax', 'get')) {
             // Không cho tùy ý đánh số page + xác định trang trước, trang sau
             betweenURLs($page, ceil($num_items / $per_page), $base_url, '&amp;page=', $prevPage, $nextPage);
         }
+        $params[':jtb_userid'] = [$user_info['userid'], PDO::PARAM_INT];
 
         $sth = $db->prepare('SELECT mtb.id, mtb.sender_role, mtb.sender_group, mtb.sender_admin, mtb.message, mtb.link, mtb.add_time, IFNULL(jtb.shown_time, 0) AS shown_time, IFNULL(jtb.viewed_time, 0) AS viewed_time, IFNULL(jtb.favorite_time, 0) AS favorite_time
             FROM ' . NV_INFORM_GLOBALTABLE . ' AS mtb
-            LEFT JOIN ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS jtb ON (jtb.pid = mtb.id AND jtb.userid = :userid)
+            LEFT JOIN ' . NV_INFORM_STATUS_GLOBALTABLE . ' AS jtb ON (jtb.pid = mtb.id AND jtb.userid = :jtb_userid)
             WHERE ' . $where_inform . '
             ORDER BY mtb.add_time DESC
             LIMIT :limit OFFSET :offset');
         $sth->bindValue(':limit', $per_page, PDO::PARAM_INT);
         $sth->bindValue(':offset', ($page - 1) * $per_page, PDO::PARAM_INT);
-        $sth->bindValue(':userid', $user_info['userid'], PDO::PARAM_INT);
         foreach ($params as $key => $val) {
             $sth->bindValue($key, $val[0], $val[1]);
         }

@@ -25,8 +25,8 @@ if (!empty($nv_Request) and $nv_Request->isset_request('store_theme_config', 'po
         $respon['message'] = 'Wrong ajax!!!';
         nv_jsonOutput($respon);
     }
-    if ($nv_Request->get_title('store_theme_config', 'post', '') !== NV_CHECK_SESSION) {
-        $respon['message'] = 'Wrong checksess!!!';
+    if (!csrf_check($nv_Request->get_string('store_theme_config', 'post'), $admin_info['admin_id'] . '_' . $admin_info['admin_theme'] . '_config')) {
+        $respon['message'] = 'Wrong session!!!';
         nv_jsonOutput($respon);
     }
 
@@ -55,12 +55,12 @@ if (!empty($nv_Request) and $nv_Request->isset_request('store_theme_config', 'po
 
 /**
  * @param string $contents
- * @param number $head_site
+ * @param int $head_site
  * @return string
  */
 function nv_admin_theme(?string $contents, $head_site = 1)
 {
-    global $admin_info, $nv_Lang, $global_config, $module_info, $page_title, $module_file, $module_name, $op, $browser, $client_info, $site_mods, $admin_mods, $db, $array_lang_admin, $select_options, $admin_menu_mods, $submenu, $set_active_op, $array_url_instruction, $array_mod_title, $my_head, $my_footer;
+    global $admin_info, $nv_Lang, $global_config, $module_info, $page_title, $module_file, $module_name, $op, $client_info, $site_mods, $admin_mods, $db, $array_lang_admin, $select_options, $admin_menu_mods, $submenu, $set_active_op, $array_url_instruction, $array_mod_title, $my_head, $my_footer;
 
     $file_name_tpl = $head_site == 1 ? 'main.tpl' : 'content.tpl';
     $tpl_dir = get_tpl_dir($admin_info['admin_theme'], NV_DEFAULT_ADMIN_THEME, '/system/' . $file_name_tpl);
@@ -95,6 +95,8 @@ function nv_admin_theme(?string $contents, $head_site = 1)
     $tpl->assign('LANG_ADMIN', $array_lang_admin);
     $tpl->assign('SELECT_OPTIONS', $select_options);
     $tpl->assign('HELP_URLS', $array_url_instruction);
+    $tpl->assign('CONFIG_CHECKSS', csrf_create($admin_info['admin_id'] . '_' . $admin_info['admin_theme'] . '_config'));
+    $tpl->assign('UPLOAD_CHECKSS', csrf_create($admin_info['admin_id'] . '_upload'));
 
     // Biến này để sử dụng trên các tệp khác gọi tpl
     $tpl->assign('ADMIN_THEME', $admin_info['admin_theme']);

@@ -118,10 +118,9 @@ if ($nv_Request->isset_request('choicesql', 'post')) {
         // Đây là trên bảng dữ liệu không phải tên module do đó chỉ chấp nhận ký tự thường, số và dấu gạch dưới
         $module = $nv_Request->get_string('module', 'post', '');
         if (!preg_match('/^[a-z0-9\_]+$/', $module)) {
-            exit();
+            nv_htmlOutput('Wrong module!');
         }
-        $stmt = $db->prepare('SHOW TABLE STATUS LIKE :module');
-        $stmt->bindValue(':module', '%\_' . $module . '%', PDO::PARAM_STR);
+        $stmt = $db->prepare("SHOW TABLE STATUS LIKE " . $db->quote('%_' . $module . '%'));
         $stmt->execute();
         $_items = $stmt->fetchAll();
         $num_table = count($_items);
@@ -266,6 +265,11 @@ if ($nv_Request->isset_request('save', 'post')) {
             $error = $nv_Lang->getModule('field_error_empty');
             $error_input = 'field';
             $error_input_parent = 'row_field_id';
+        } elseif (!preg_match('/^[a-z][a-z0-9_]*$/', $dataform['field'])) {
+            // Bắt buộc field phải bắt đầu bằng chữ cái thường.
+            $error = $nv_Lang->getModule('field_error_start');
+            $error_input = 'field';
+            $error_input_parent = 'row_field_id';
         } else {
             // Kiểm tra trùng trường dữ liệu
             $stmt = $db->prepare('SELECT * FROM ' . NV_MOD_TABLE . '_field WHERE field= :field');
@@ -295,8 +299,10 @@ if ($nv_Request->isset_request('save', 'post')) {
         $dataform['match_type'] = $nv_Request->get_title('match_type', 'post', '', 50, $preg_replace);
         $dataform['match_regex'] = ($dataform['match_type'] == 'regex') ? $nv_Request->get_string('match_regex', 'post', '', false) : '';
         $dataform['func_callback'] = ($dataform['match_type'] == 'callback') ? $nv_Request->get_string('match_callback', 'post', '', false) : '';
-        if ($dataform['func_callback'] != '' and !function_exists($dataform['func_callback'])) {
+        $allowed_callbacks = (isset($global_config['user_field_callbacks']) and is_array($global_config['user_field_callbacks'])) ? $global_config['user_field_callbacks'] : [];
+        if ($dataform['func_callback'] != '' and (!function_exists($dataform['func_callback']) or !in_array($dataform['func_callback'], $allowed_callbacks, true))) {
             $dataform['func_callback'] = '';
+            $dataform['match_type'] = 'none';
         }
 
         if ($dataform['field_type'] == 'editor') {
@@ -391,8 +397,13 @@ if ($nv_Request->isset_request('save', 'post')) {
             'widthlimit' => $nv_Request->get_typed_array('widthlimit', 'post', 'int', []),
             'heightlimit' => $nv_Request->get_typed_array('heightlimit', 'post', 'int', [])
         ];
+        $datafile['file_max_size'] = min($datafile['file_max_size'], (int) $global_config['nv_max_size']);
+
         if (empty($datafile['filetype'])) {
             !$error && $error = $nv_Lang->getModule('field_file_exts_error');
+        } elseif ($datafile['file_max_size'] < 1) {
+            !$error && $error = $nv_Lang->getModule('field_file_max_size_error');
+            $error_input = 'file_max_size';
         } else {
             if (!empty($datafile['filetype']) and in_array('images', $datafile['filetype'], true)) {
                 if ($datafile['widthlimit']['equal'] > 0) {
@@ -489,8 +500,26 @@ if ($nv_Request->isset_request('save', 'post')) {
             $choicesql_column_order = $nv_Request->get_string('choicesql_column_order', 'post', '');
             // Kiểu sắp xếp
             $choicesql_sort_type = $nv_Request->get_string('choicesql_sort_type', 'post', '');
-            if (!isset($choicesql_sort_type)) {
-                $choicesql_sort_type = current(array_keys($array_sqlchoice_order));
+            $sort_type_allowed = array_keys($array_sqlchoice_order);
+            if (!in_array($choicesql_sort_type, $sort_type_allowed, true)) {
+                $choicesql_sort_type = $sort_type_allowed[0];
+            }
+
+            // Chuẩn hóa dữ liệu đầu vào
+            if (!preg_match($global_config['check_module_data'], $choicesql_module)) {
+                $choicesql_module = '';
+            }
+            if (!preg_match($global_config['check_module_data'], $choicesql_table)) {
+                $choicesql_table = '';
+            }
+            if (!preg_match($global_config['check_module_data'], $choicesql_column_key)) {
+                $choicesql_column_key = '';
+            }
+            if (!preg_match($global_config['check_module_data'], $choicesql_column_val)) {
+                $choicesql_column_val = '';
+            }
+            if (!preg_match($global_config['check_module_data'], $choicesql_column_order)) {
+                $choicesql_column_order = '';
             }
 
             if ($choicesql_module != '' and $choicesql_table != '' and $choicesql_column_key != '' and $choicesql_column_val != '') {
@@ -731,7 +760,7 @@ if ($nv_Request->isset_request('del', 'post')) {
 
                 nv_jsonOutput([
                     'status' => 'success',
-                    'mess' => $nv_Lang->getGlobal('delete_success')
+                    'mess' => $nv_Lang->getGlobal('success_level')
                 ]);
             }
         }
@@ -739,7 +768,7 @@ if ($nv_Request->isset_request('del', 'post')) {
 
     nv_jsonOutput([
         'status' => 'error',
-        'mess' => $nv_Lang->getGlobal('error_delete')
+        'mess' => $nv_Lang->getGlobal('danger_level')
     ]);
 }
 
@@ -1053,6 +1082,10 @@ if ($nv_Request->isset_request('qlist', 'get')) {
     }
     $tpl->assign('MATCH_TYPE_LIST', $match_type_list);
 
+    $callback_function_list = (isset($global_config['user_field_callbacks']) and is_array($global_config['user_field_callbacks'])) ? $global_config['user_field_callbacks'] : [];
+    $callback_function_list = array_map('nv_htmlspecialchars', $callback_function_list);
+    $tpl->assign('CALLBACK_FUNCTION_LIST', $callback_function_list);
+
     // File types và MIME types
     $tpl->assign('DATAFILE', $datafile);
     $ini = array_intersect_key(nv_parse_ini_file(NV_ROOTDIR . '/includes/ini/mime.ini', true), array_flip($global_config['file_allowed_ext']));
@@ -1077,7 +1110,10 @@ if ($nv_Request->isset_request('qlist', 'get')) {
     $p_size = $global_config['nv_max_size'] / 100;
     $size_list = [];
     for ($index = 100; $index > 0; --$index) {
-        $size = floor($index * $p_size);
+        $size = (int) floor($index * $p_size);
+        if ($size < 1) {
+            break;
+        }
         $size_list[] = [
             'key' => $size,
             'name' => nv_convertfromBytes($size),

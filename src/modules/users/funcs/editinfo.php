@@ -77,7 +77,7 @@ function nv_check_username_change($login, $edit_userid)
  */
 function nv_check_email_change(&$email, $edit_userid)
 {
-    global $db, $nv_Lang, $user_info, $global_users_config, $global_config, $module_name;
+    global $db, $nv_Lang, $global_users_config, $global_config, $module_name;
 
     $error = nv_check_valid_email($email, true);
     if ($error[0] != '') {
@@ -167,7 +167,7 @@ function nv_check_email_change(&$email, $edit_userid)
  */
 function get_field_config()
 {
-    global $db;
+    global $db, $global_config;
 
     $array_field_config = [];
     $is_custom_field = false;
@@ -181,15 +181,27 @@ function get_field_config()
             $row_field['field_choices'] = unserialize($row_field['field_choices'], NV_UNSERIALIZE_SAFE);
         } elseif (!empty($row_field['sql_choices'])) {
             $row_field['sql_choices'] = explode('|', $row_field['sql_choices']);
-            $row_field['field_choices'] = [];
-
-            $query = 'SELECT ' . $row_field['sql_choices'][2] . ' as field_key, ' . $row_field['sql_choices'][3] . ' as field_value FROM ' . $row_field['sql_choices'][1];
-            if (!empty($row_field['sql_choices'][4]) and !empty($row_field['sql_choices'][5])) {
-                $query .= ' ORDER BY ' . $row_field['sql_choices'][4] . ' ' . $row_field['sql_choices'][5];
+            foreach ($row_field['sql_choices'] as $key => $val) {
+                if ($key >= 0 and $key <= 3 and !preg_match($global_config['check_module_data'], $val)) {
+                    $row_field['sql_choices'] = [];
+                    break;
+                } elseif ($key == 4 and !preg_match($global_config['check_module_data'], $val)) {
+                    $row_field['sql_choices'][$key] = '';
+                } elseif ($key == 5 and !in_array($val, ['ASC', 'DESC'], true)) {
+                    $row_field['sql_choices'][$key] = '';
+                }
             }
-            $result = $db->query($query);
-            while ($row = $result->fetch()) {
-                $row_field['field_choices'][$row['field_key']] = $row['field_value'];
+            $row_field['field_choices'] = [];
+            if (!empty($row_field['sql_choices'])) {
+                $query = 'SELECT ' . $row_field['sql_choices'][2] . ', ' . $row_field['sql_choices'][3] . ' FROM ' . $row_field['sql_choices'][1];
+                if (!empty($row_field['sql_choices'][4]) and !empty($row_field['sql_choices'][5])) {
+                    $query .= ' ORDER BY ' . $row_field['sql_choices'][4] . ' ' . $row_field['sql_choices'][5];
+                }
+                $sth = $db->query($query);
+                while ($row = $sth->fetch(PDO::FETCH_NUM)) {
+                    $row_field['field_choices'][$row[0]] = $row[1];
+                }
+                $sth->closeCursor();
             }
         }
         $row_field['limited_values'] = !empty($row_field['limited_values']) ? json_decode($row_field['limited_values'], true) : [];
@@ -300,12 +312,34 @@ function nv_groups_list_pub2($edit_userid)
 $array_data = [];
 // checkss khớp với modules/two-step-verification/funcs/main.php thay đổi cần cập nhật
 $array_data['checkss'] = md5(NV_CHECK_SESSION . '_' . $module_name . '_' . $op . '_' . $user_info['userid']);
+$array_data['checkss_avatar'] = csrf_create($g_csrf_key['avatar']);
 $array_data['awaitinginfo'] = [];
 $array_data['editcensor'] = $global_users_config['active_editinfo_censor'];
 $array_data['confirmed_pass'] = is_verified_password('passkey');
 
 $checkss = $nv_Request->get_title('checkss', 'post', '');
-$nv_redirect = nv_get_redirect();
+$nv_redirect = $sso_redirect = '';
+if ($nv_Request->isset_request('nv_redirect', 'post,get')) {
+    $nv_redirect = nv_get_redirect();
+    if ($nv_Request->isset_request('nv_redirect', 'get') and !empty($nv_redirect)) {
+        $nv_Request->set_Session('nv_redirect_' . $module_data, $nv_redirect);
+    }
+} elseif ($nv_Request->isset_request('sso_redirect', 'get')) {
+    $sso_redirect = $nv_Request->get_title('sso_redirect', 'get', '');
+    if (!empty($sso_redirect)) {
+        $nv_Request->set_Session('sso_redirect_' . $module_data, $sso_redirect);
+    }
+}
+
+$array_data['client'] = '';
+if (defined('SSO_CLIENT_DOMAIN')) {
+    $allowed_client_origin = explode(',', SSO_CLIENT_DOMAIN);
+    $array_data['client'] = $nv_Request->get_title('client', 'get,post', '');
+    if (!empty($array_data['client']) and !in_array($array_data['client'], $allowed_client_origin, true)) {
+        // 406 Not Acceptable
+        nv_info_die($nv_Lang->getGlobal('error_404_title'), $nv_Lang->getGlobal('error_404_title'), $nv_Lang->getGlobal('error_404_content'), 406);
+    }
+}
 
 if (isset($array_op[2]) and !defined('ACCESS_EDITUS')) {
     if (empty($_POST)) {
@@ -383,7 +417,6 @@ if ((int) $row['safemode'] > 0) {
 
             nv_jsonOutput([
                 'status' => 'ok',
-                'input' => '',
                 'mess' => $nv_Lang->getModule('safe_send_ok', $ss_safesend)
             ]);
         }
@@ -503,6 +536,9 @@ if (defined('ACCESS_EDITUS')) {
     $array_data['type'] = (isset($array_op[1]) and !empty($array_op[1]) and in_array($array_op[1], $types, true)) ? $array_op[1] : 'basic';
     $page_url = NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name . '&amp;' . NV_OP_VARIABLE . '=editinfo';
 }
+if (!empty($nv_redirect)) {
+    $page_url .= '&amp;nv_redirect=' . $nv_redirect;
+}
 
 $data_openid = [];
 $data_openid_key = [];
@@ -587,7 +623,11 @@ if (in_array('openid', $types, true) and $nv_Request->isset_request('server', 'g
         }
     }
 
-    $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid VALUES (' . $edit_userid . ', :openid, :opid, :id, :email )');
+    $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid (
+        userid, openid, opid, id, email
+    ) VALUES (
+        ' . $edit_userid . ', :openid, :opid, :id, :email
+    )');
     $stmt->bindParam(':openid', $server, PDO::PARAM_STR);
     $stmt->bindParam(':opid', $opid, PDO::PARAM_STR);
     $stmt->bindParam(':id', $attribs['id'], PDO::PARAM_STR);
@@ -745,7 +785,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
     }
     nv_jsonOutput([
         'status' => 'ok',
-        'input' => nv_url_rewrite($page_url . '/langinterface', true),
+        'redirect' => nv_url_rewrite($page_url . '/langinterface', true),
         'mess' => $nv_Lang->getModule('editinfo_ok')
     ]);
 } elseif ($checkss == $array_data['checkss'] and $array_data['type'] == 'username') {
@@ -805,7 +845,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
     nv_jsonOutput([
         'status' => 'ok',
-        'input' => nv_url_rewrite($page_url . '/username', true),
+        'redirect' => nv_url_rewrite($page_url . '/username', true),
         'mess' => $mess
     ]);
 } elseif ($checkss == $array_data['checkss'] and $array_data['type'] == 'email') {
@@ -969,7 +1009,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
         nv_jsonOutput([
             'status' => 'ok',
-            'input' => nv_url_rewrite($page_url . '/email', true),
+            'redirect' => nv_url_rewrite($page_url . '/email', true),
             'mess' => $mess
         ]);
     }
@@ -1055,7 +1095,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
     nv_jsonOutput([
         'status' => 'ok',
-        'input' => nv_url_rewrite($page_url . '/basic', true),
+        'redirect' => nv_url_rewrite($page_url . '/basic', true),
         'mess' => $mess
     ]);
 } elseif ($checkss == $array_data['checkss'] and $array_data['type'] == 'passkey' and $array_data['confirmed_pass']) {
@@ -1115,14 +1155,14 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
     foreach ($openid_del as $o) {
         [$opid, $server] = explode('_', $o, 2);
         if (!(!empty($user_info['openid_server']) and $user_info['openid_server'] == $server and !empty($user_info['current_openid'] and $user_info['current_openid'] == $opid))) {
-            nv_insert_logs(NV_LANG_DATA, $module_name, 'Delete oauth', $client_info['ip'] . ' | ' . $edit_userid . ' | ' . $server, $user_info['userid']);
-
-            $stmt = $db->prepare('DELETE FROM ' . NV_MOD_TABLE . '_openid WHERE openid=:openid AND opid=:opid');
-            $stmt->bindParam(':openid', $server, PDO::PARAM_STR);
-            $stmt->bindParam(':opid', $opid, PDO::PARAM_STR);
-            $stmt->execute();
-
             if (isset($data_openid_key[$o])) {
+                nv_insert_logs(NV_LANG_DATA, $module_name, 'Delete oauth', $client_info['ip'] . ' | ' . $edit_userid . ' | ' . $server, $user_info['userid']);
+
+                $stmt = $db->prepare('DELETE FROM ' . NV_MOD_TABLE . '_openid WHERE openid=:openid AND opid=:opid');
+                $stmt->bindParam(':openid', $server, PDO::PARAM_STR);
+                $stmt->bindParam(':opid', $opid, PDO::PARAM_STR);
+                $stmt->execute();
+
                 $openid_mess[] = nv_ucfirst($data_openid_key[$o]['openid']);
             }
         }
@@ -1150,7 +1190,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
     nv_jsonOutput([
         'status' => 'ok',
-        'input' => nv_url_rewrite($page_url . '/openid', true),
+        'redirect' => nv_url_rewrite($page_url . '/openid', true),
         'mess' => $nv_Lang->getModule('openid_deleted')
     ]);
 } elseif ($checkss == $array_data['checkss'] and $array_data['type'] == 'group') {
@@ -1261,7 +1301,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
     $db->query('UPDATE ' . NV_MOD_TABLE . " SET in_groups='" . implode(',', $in_groups) . "', last_update=" . NV_CURRENTTIME . ' WHERE userid=' . $edit_userid);
     nv_jsonOutput([
         'status' => 'ok',
-        'input' => nv_url_rewrite($page_url . '/group', true),
+        'redirect' => nv_url_rewrite($page_url . '/group', true),
         'mess' => $nv_Lang->getModule('in_group_ok')
     ]);
 } elseif ($checkss == $array_data['checkss'] and $array_data['type'] == 'others') {
@@ -1322,7 +1362,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
         nv_jsonOutput([
             'status' => 'ok',
-            'input' => nv_url_rewrite($page_url . '/others', true),
+            'redirect' => nv_url_rewrite($page_url . '/others', true),
             'mess' => $nv_Lang->getModule('editinfo_okcensor')
         ]);
     } else {
@@ -1331,7 +1371,7 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
         nv_jsonOutput([
             'status' => 'ok',
-            'input' => nv_url_rewrite($page_url . '/others', true),
+            'redirect' => nv_url_rewrite($page_url . '/others', true),
             'mess' => $nv_Lang->getModule('editinfo_ok')
         ]);
     }
@@ -1384,7 +1424,6 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
         nv_jsonOutput([
             'status' => 'ok',
-            'input' => '',
             'mess' => $nv_Lang->getModule('safe_send_ok', $ss_safesend)
         ]);
     }
@@ -1407,9 +1446,19 @@ if ($checkss == $array_data['checkss'] and $array_data['type'] == 'basic') {
 
     nv_jsonOutput([
         'status' => 'ok',
-        'input' => nv_url_rewrite($page_url, true),
+        'redirect' => nv_url_rewrite($page_url, true),
         'mess' => $nv_Lang->getModule('safe_activate_ok')
     ]);
+}
+
+if ($array_data['type'] == 'avatar') {
+    $array_data['avatar_direct_change'] = (int) $nv_Request->get_bool('avatar_direct_change', 'post,get', false);
+}
+if (in_array('avatar', $types, true)) {
+    $array_data['url_avatar'] = NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name . '&amp;' . NV_OP_VARIABLE . '=avatar/src';
+    if (!empty($array_data['client'])) {
+        $array_data['url_avatar'] .= '&amp;client=' . $array_data['client'];
+    }
 }
 
 $page_title = $nv_Lang->getModule('editinfo_pagetitle');

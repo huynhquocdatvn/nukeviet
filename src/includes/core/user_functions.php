@@ -452,7 +452,7 @@ function nv_html_meta_tags($html = true)
         $mt = simplexml_load_string($mt);
         $mt = nv_object2array($mt);
 
-        if ($mt['meta_item']) {
+        if (isset($mt['meta_item'])) {
             if (isset($mt['meta_item'][0])) {
                 $metatags = $mt['meta_item'];
             } else {
@@ -899,7 +899,7 @@ function nv_html_site_js($html = true, $other_js = [], $language_js = true, $glo
         if ($global_config['XSSsanitize']) {
             $return[] = [
                 'ext' => 1,
-                'content' => ASSETS_STATIC_URL . '/js/DOMPurify/purify' . ($browser->isBrowser(Browser::BROWSER_IE) ? '2' : '3') . '.js'
+                'content' => ASSETS_STATIC_URL . '/js/DOMPurify/purify.min.js'
             ];
         }
 
@@ -972,7 +972,7 @@ function nv_html_site_js($html = true, $other_js = [], $language_js = true, $glo
         $return[] = [
             'type' => 'application/ld+json',
             'ext' => 0,
-            'content' => json_encode(nv_unhtmlspecialchars($schemas), NV_JSON_ENCODE)
+            'content' => json_encode(nv_unhtmlspecialchars($schemas), NV_JSON_ENCODE_LDJSON)
         ];
     }
 

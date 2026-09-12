@@ -4,7 +4,7 @@
 <script type="text/javascript" src="{$smarty.const.NV_STATIC_URL}themes/{$TEMPLATE}/js/nv.block.content.js"></script>
 <script src="{$smarty.const.ASSETS_STATIC_URL}/js/select2/select2.min.js"></script>
 <script src="{$smarty.const.ASSETS_STATIC_URL}/js/select2/i18n/{$smarty.const.NV_LANG_INTERFACE}.js"></script>
-<form class="p-1 ajax-submit" method="post" action="{$smarty.const.NV_BASE_ADMINURL}index.php?{$smarty.const.NV_LANG_VARIABLE}={$smarty.const.NV_LANG_DATA}&amp;{$smarty.const.NV_NAME_VARIABLE}={$MODULE_NAME}&amp;{$smarty.const.NV_OP_VARIABLE}={$OP}&amp;selectthemes={$SELECTTHEMES}{if not empty($BLOCKREDIRECT)}&amp;blockredirect={$BLOCKREDIRECT}{/if}" id="block-content-form" data-page-url="{$smarty.const.NV_BASE_ADMINURL}index.php?{$smarty.const.NV_LANG_VARIABLE}={$smarty.const.NV_LANG_DATA}&amp;{$smarty.const.NV_NAME_VARIABLE}={$MODULE_NAME}" data-selectthemes="{$SELECTTHEMES}" data-callback="nvBlockCtCallback" novalidate>
+<form class="p-1 ajax-submit" method="post" action="{$smarty.const.NV_BASE_ADMINURL}index.php?{$smarty.const.NV_LANG_VARIABLE}={$smarty.const.NV_LANG_DATA}&amp;{$smarty.const.NV_NAME_VARIABLE}={$MODULE_NAME}&amp;{$smarty.const.NV_OP_VARIABLE}={$OP}&amp;selectthemes={$SELECTTHEMES}{if not empty($BLOCKREDIRECT)}&amp;blockredirect={$BLOCKREDIRECT}{/if}" id="block-content-form" data-page-url="{$smarty.const.NV_BASE_ADMINURL}index.php?{$smarty.const.NV_LANG_VARIABLE}={$smarty.const.NV_LANG_DATA}&amp;{$smarty.const.NV_NAME_VARIABLE}={$MODULE_NAME}" data-selectthemes="{$SELECTTHEMES}" data-checkss="{$ROW.checkss}" data-callback="nvBlockCtCallback" novalidate>
     <div class="card border-primary border-1 mb-3">
         <div class="card-header fs-5 fw-medium py-2 text-bg-primary">
             {$LANG->getModule('theme', "<span class=\"text-capitalize\">`$SELECTTHEMES`</span>")}
@@ -16,7 +16,7 @@
                 <div class="col-sm-3 col-form-label text-sm-end text-truncate fw-medium" title="{$LANG->getModule('of_module')}">{$LANG->getModule('of_module')}:</div>
                 <div class="col-sm-9">
                     <div class="row g-2">
-                        <div class="col-6">
+                        <div class="col-sm-6">
                             <select name="module_type" class="form-select" aria-label="{$LANG->getModule('of_module')}">
                                 <option value="">{$LANG->getModule('block_select_type')}</option>
                                 <option value="theme"{if $ROW.module eq 'theme'} selected{/if}>{$LANG->getModule('block_type_theme')}</option>
@@ -25,7 +25,7 @@
                                 {/foreach}
                             </select>
                         </div>
-                        <div class="col-6">
+                        <div class="col-sm-6">
                             <select name="file_name" class="form-select" aria-label="{$LANG->getModule('block_select')}" data-default="{$LANG->getModule('block_select')}">
                                 {$BLOCKLIST}
                             </select>

@@ -37,6 +37,27 @@ if ($nv_Request->isset_request('extract', 'get')) {
         $zip = new PclZip($filename);
         $ziplistContent = $zip->listContent();
 
+        // Kiểm tra file ZIP hợp lệ
+        if ($ziplistContent === 0 || empty($ziplistContent)) {
+            nv_htmlOutput(nv_theme_alert($nv_Lang->getGlobal('danger_level'), $nv_Lang->getModule('autoinstall_error_downloaded'), 'danger'));
+        }
+
+        // Kiểm tra dung lượng file ZIP gốc
+        $zipFileSize = filesize($filename);
+        if ($zipFileSize > NV_UPLOAD_MAX_FILESIZE) {
+            nv_htmlOutput(nv_theme_alert($nv_Lang->getGlobal('danger_level'), $nv_Lang->getModule('autoinstall_error_uploadfile1', nv_convertfromBytes(NV_UPLOAD_MAX_FILESIZE)), 'danger'));
+        }
+
+        // Phòng chống Zip Bomb (tỉ lệ giải nén tối đa 10:1)
+        $totalUncompressedSize = 0;
+        foreach ($ziplistContent as $lf) {
+            $totalUncompressedSize += (int) $lf['size'];
+        }
+        if ($totalUncompressedSize > $zipFileSize * 10) {
+            nv_htmlOutput(nv_theme_alert($nv_Lang->getGlobal('danger_level'), 'Security Error: Zip Bomb detected (abnormal compression ratio).', 'danger'));
+        }
+        unset($totalUncompressedSize, $lf, $zipFileSize);
+
         $temp_extract_dir = NV_TEMP_DIR . '/' . md5($filename . NV_CHECK_SESSION);
 
         $no_extract = [];
@@ -45,7 +66,7 @@ if ($nv_Request->isset_request('extract', 'get')) {
         $extConfig = [];
         $fileConfig = [];
 
-        if (NV_ROOTDIR . '/' . $temp_extract_dir) {
+        if (is_dir(NV_ROOTDIR . '/' . $temp_extract_dir)) {
             nv_deletefile(NV_ROOTDIR . '/' . $temp_extract_dir, true);
         }
 
@@ -109,7 +130,11 @@ if ($nv_Request->isset_request('extract', 'get')) {
         ];
 
         // Giải nén vào thư mục tạm
-        $extract = $zip->extract(PCLZIP_OPT_PATH, NV_ROOTDIR . '/' . $temp_extract_dir);
+        $extract = $zip->extract(
+            PCLZIP_OPT_PATH, NV_ROOTDIR . '/' . $temp_extract_dir,
+            PCLZIP_OPT_EXTRACT_DIR_RESTRICTION, NV_ROOTDIR . '/' . $temp_extract_dir
+        );
+
         foreach ($extract as $extract_i) {
             if ($extract_i['status'] != 'ok' and $extract_i['status'] != 'already_a_directory') {
                 $no_extract[] = $extract_i['stored_filename'];
@@ -275,10 +300,20 @@ if ($nv_Request->isset_request('extract', 'get')) {
 
                 // Di chuyen cac file vao thu muc trong site
                 if (empty($error_create_folder)) {
+                    $temp_base = realpath(NV_ROOTDIR . '/' . $temp_extract_dir);
                     foreach ($ziplistContent as $array_file) {
-                        $array_name_i = explode('/', $extract_i['stored_filename']);
+                        $array_name_i = explode('/', $array_file['filename']);
 
                         if (empty($array_file['folder']) and $array_file['filename'] != 'config.ini' and $array_name_i[count($array_name_i) - 1] != '.htaccess') {
+                            // Từ chối tệp tin nếu nó nằm ngoài thư mục tạm
+                            $src_real = realpath(NV_ROOTDIR . '/' . $temp_extract_dir . '/' . $array_file['filename']);
+                            if ($src_real === false or $temp_base === false or strpos($src_real, $temp_base . DIRECTORY_SEPARATOR) !== 0) {
+                                $error_move_folder[] = $array_file['filename'];
+                                continue;
+                            }
+
+                            $dest_path = $extract_dir . '/' . $array_file['filename'];
+
                             // Xoa file neu ton tai
                             if (file_exists(NV_ROOTDIR . '/' . $array_file['filename'])) {
                                 if (!($ftp_check_login == 1 and ftp_delete($conn_id, $array_file['filename']))) {
@@ -290,11 +325,11 @@ if ($nv_Request->isset_request('extract', 'get')) {
 
                             // Di chuyen file
                             if (!($ftp_check_login == 1 and ftp_rename($conn_id, $temp_extract_dir . '/' . $array_file['filename'], $array_file['filename']))) {
-                                @rename(NV_ROOTDIR . '/' . $temp_extract_dir . '/' . $array_file['filename'], $extract_dir . '/' . $array_file['filename']);
+                                @rename($src_real, $dest_path);
                             }
 
                             // Di chuyen that bai
-                            if (file_exists(NV_ROOTDIR . '/' . $temp_extract_dir . '/' . $array_file['filename'])) {
+                            if (file_exists($src_real)) {
                                 $error_move_folder[] = $array_file['filename'];
                             }
 
@@ -393,11 +428,13 @@ if ($nv_Request->isset_request('extract', 'get')) {
 }
 
 $error = '';
+$setup_ips = (isset($global_config['extension_setup_ips']) and is_array($global_config['extension_setup_ips'])) ? $global_config['extension_setup_ips'] : [];
+
 if ($nv_Request->isset_request('uploaded', 'get')) {
     if (!file_exists($filename)) {
         $error = $nv_Lang->getModule('autoinstall_error_downloaded');
     }
-} elseif ($global_config['extension_setup'] == 1 or $global_config['extension_setup'] == 3) {
+} elseif (($global_config['extension_setup'] == 1 or $global_config['extension_setup'] == 3) and in_array(NV_CLIENT_IP, $setup_ips, true)) {
     if (!isset($_FILES, $_FILES['extfile'], $_FILES['extfile']['tmp_name'])) {
         $error = $nv_Lang->getModule('autoinstall_error_downloaded');
     } elseif (!$sys_info['zlib_support']) {
@@ -465,6 +502,22 @@ if (empty($error)) {
         $sizeLists = count($listFiles);
         $iniIndex = -1;
 
+        // Kiểm tra ZIP bomb: Tổng dung lượng giải nén của tất cả file phải nhỏ hơn NV_UPLOAD_MAX_FILESIZE
+        $totalUncompressedSize = 0;
+        foreach ($listFiles as $_lf) {
+            $totalUncompressedSize += (int) $_lf['size'];
+        }
+        if ($totalUncompressedSize > NV_UPLOAD_MAX_FILESIZE) {
+            $error = $nv_Lang->getGlobal('error_upload_max_user_size', nv_convertfromBytes(NV_UPLOAD_MAX_FILESIZE));
+        }
+
+        // Phòng chống Zip Bomb (tỉ lệ giải nén tối đa 10:1)
+        $zipFileSize = filesize($filename);
+        if ($zipFileSize > 0 && $totalUncompressedSize > $zipFileSize * 10) {
+            $error = 'Security Error: Zip Bomb detected (abnormal compression ratio).';
+        }
+        unset($totalUncompressedSize, $_lf, $zipFileSize);
+
         // Tìm vị trí file config.ini
         for ($i = $sizeLists - 1; $i >= 0; --$i) {
             if (!$listFiles[$i]['folder'] and trim($listFiles[$i]['filename']) == 'config.ini') {
@@ -485,7 +538,14 @@ if (empty($error)) {
                 @nv_deletefile(NV_ROOTDIR . '/' . $temp_extract_dir . '/config.ini');
             }
 
-            $extract = $zip->extractByIndex($iniIndex, PCLZIP_OPT_PATH, NV_ROOTDIR . '/' . $temp_extract_dir);
+            /**
+             * @var array<int, array<string, string>>|int $extract
+             */
+            $extract = $zip->extractByIndex(
+                $iniIndex,
+                PCLZIP_OPT_PATH, NV_ROOTDIR . '/' . $temp_extract_dir,
+                PCLZIP_OPT_EXTRACT_DIR_RESTRICTION, NV_ROOTDIR . '/' . $temp_extract_dir
+            );
 
             if (empty($extract) or !isset($extract[0]['status']) or $extract[0]['status'] != 'ok' or !file_exists(NV_ROOTDIR . '/' . $temp_extract_dir . '/config.ini')) {
                 $error = $nv_Lang->getModule('autoinstall_cantunzip');

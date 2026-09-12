@@ -49,7 +49,7 @@ if ($num_items) {
             'count' => $row['total'],
             'count_format' => nv_number_format($row['total']),
             'last_visit' => !empty($row['last_update']) ? nv_datetime_format($row['last_update'], 0, 0) : '',
-            'bymonth_link' => NV_BASE_MOD_URL . '&amp;' . NV_OP_VARIABLE . '=' . $module_info['alias']['referer'] . '&amp;host=' . $row['host'],
+            'bymonth_link' => NV_BASE_MOD_URL . '&amp;' . NV_OP_VARIABLE . '=' . ($module_info['alias']['referer'] ?? 'referer') . '&amp;host=' . $row['host'],
             'proc' => ceil(($row['total'] / $max) * 100)
         ];
     }
@@ -64,7 +64,7 @@ if ($num_items) {
     $contents = nv_theme_statistics_allreferers($host_list, $generate_page);
 }
 
-$canonicalUrl = getCanonicalUrl($page_url);
+!defined('NV_ADMIN') && $canonicalUrl = getCanonicalUrl($page_url);
 
 include NV_ROOTDIR . '/includes/header.php';
 echo nv_site_theme($contents);

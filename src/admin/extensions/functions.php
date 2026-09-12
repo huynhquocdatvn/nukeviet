@@ -26,11 +26,6 @@ $menu_top = [
 
 $allow_func = ['main', 'newest', 'popular', 'featured', 'downloaded', 'favorites', 'detail', 'login', 'update', 'manage'];
 
-// Cho phep upload ung dung
-if (!empty($global_config['extension_setup']) and in_array(NV_CLIENT_IP, ($global_config['extension_setup_ips'] ?? []), true)) {
-    $allow_func[] = 'upload';
-}
-
 // Cho phep cai ung dung tu NukeViet Store
 if ($global_config['extension_setup'] == 2 or $global_config['extension_setup'] == 3) {
     $allow_func[] = 'install';
@@ -226,6 +221,38 @@ function nv_check_ext_config_filecontent($extConfig)
 }
 
 /**
+ * Kiểm đường dẫn của tệp tin trong gói ứng dụng hợp lệ:
+ * Không chứa path rỗng, absolute path, .., ., backslash traversal, drive path C:, mọi dấu :, null byte
+ *
+ * @param string $filename
+ * @return bool
+ */
+function nv_zip_validate_member_name($filename)
+{
+    if (!is_string($filename) || $filename === '') {
+        return false;
+    }
+    if (strpos($filename, "\0") !== false) {
+        return false;
+    }
+    if (strpos($filename, ':') !== false) {
+        return false;
+    }
+    if (strpos($filename, '\\') !== false) {
+        return false;
+    }
+    if ($filename[0] === '/') {
+        return false;
+    }
+    foreach (explode('/', $filename) as $part) {
+        if ($part === '..' || $part === '.') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * @param array $fileinfo
  * @param array $arraySysOption
  * @param array $info
@@ -234,6 +261,11 @@ function nv_check_ext_config_filecontent($extConfig)
 function check_structure($fileinfo, $arraySysOption, $info)
 {
     $file_path = trim($fileinfo['filename']);
+
+    if (!nv_zip_validate_member_name($file_path)) {
+        return false;
+    }
+
     $folder = explode('/', $file_path);
     $lev_folder = count($folder) - 1;
     $is_folder = $fileinfo['folder'];
@@ -277,7 +309,7 @@ function check_structure($fileinfo, $arraySysOption, $info)
         return false;
     }
 
-    // Trong assets và upload file không được chứa phần mở rộng bị cấm
+    // Trong assets và uploads file không được chứa phần mở rộng bị cấm
     if (($root_folder == 'assets' or $root_folder == 'uploads') and in_array(nv_getextension($file_path), $arraySysOption['forbidExt'])) {
         return false;
     }

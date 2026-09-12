@@ -97,7 +97,7 @@ function reg_result($array)
 {
     global $nv_redirect;
 
-    $array['redirect'] = nv_redirect_decrypt($nv_redirect);
+    $array['redirect'] ??= nv_redirect_decrypt($nv_redirect);
     nv_jsonOutput($array);
 }
 
@@ -175,17 +175,28 @@ while ($row_field = $result_field->fetch()) {
         $row_field['field_choices'] = unserialize($row_field['field_choices'], NV_UNSERIALIZE_SAFE);
     } elseif (!empty($row_field['sql_choices'])) {
         $row_field['sql_choices'] = explode('|', $row_field['sql_choices']);
+        foreach ($row_field['sql_choices'] as $key => $val) {
+            if ($key >= 0 and $key <= 3 and !preg_match($global_config['check_module_data'], $val)) {
+                $row_field['sql_choices'] = [];
+                break;
+            } elseif ($key == 4 and !preg_match($global_config['check_module_data'], $val)) {
+                $row_field['sql_choices'][$key] = '';
+            } elseif ($key == 5 and !in_array($val, ['ASC', 'DESC'], true)) {
+                $row_field['sql_choices'][$key] = '';
+            }
+        }
         $row_field['field_choices'] = [];
-        $query = 'SELECT ' . $row_field['sql_choices'][2] . ' as field_key, ' . $row_field['sql_choices'][3] . ' as field_value FROM ' . $row_field['sql_choices'][1];
-        if (!empty($row_field['sql_choices'][4]) and !empty($row_field['sql_choices'][5])) {
-            $query .= ' ORDER BY ' . $row_field['sql_choices'][4] . ' ' . $row_field['sql_choices'][5];
+        if (!empty($row_field['sql_choices'])) {
+            $query = 'SELECT ' . $row_field['sql_choices'][2] . ', ' . $row_field['sql_choices'][3] . ' FROM ' . $row_field['sql_choices'][1];
+            if (!empty($row_field['sql_choices'][4]) and !empty($row_field['sql_choices'][5])) {
+                $query .= ' ORDER BY ' . $row_field['sql_choices'][4] . ' ' . $row_field['sql_choices'][5];
+            }
+            $sth = $db->query($query);
+            while ($row = $sth->fetch(PDO::FETCH_NUM)) {
+                $row_field['field_choices'][$row[0]] = $row[1];
+            }
+            $sth->closeCursor();
         }
-
-        $sth = $db->query($query);
-        while ($row = $sth->fetch()) {
-            $row_field['field_choices'][$row['field_key']] = $row['field_value'];
-        }
-        $sth->closeCursor();
     }
     $row_field['system'] = $row_field['is_system'];
     $array_field_config[$row_field['field']] = $row_field;
@@ -376,7 +387,7 @@ if ($checkss == $array_register['checkss']) {
 
             $array = [
                 'status' => 'ok',
-                'input' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name, true),
+                'redirect' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name, true),
                 'mess' => $info,
                 'timeout' => 0
             ];
@@ -384,7 +395,7 @@ if ($checkss == $array_register['checkss']) {
                 $sso_redirect_users = $nv_Request->get_title('sso_redirect_' . $module_data, 'session', '');
                 $sso_redirect_users = NukeViet\Client\Sso::decrypt($sso_redirect_users);
                 if (!empty($sso_redirect_users)) {
-                    $array['input'] = $sso_redirect_users;
+                    $array['redirect'] = $sso_redirect_users;
                 }
             }
             nv_jsonOutput($array);
@@ -468,9 +479,10 @@ if ($checkss == $array_register['checkss']) {
             nv_sendmail_template_async([$module_name, Emails::NEW_INFO], $send_data, NV_LANG_INTERFACE);
 
             if (defined('ACCESS_ADDUS')) {
+                // Trưởng nhóm thêm thành viên thì chuyển về trang nhóm
                 $url = NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=groups/' . $group_id;
             } elseif (!empty($global_config['auto_login_after_reg'])) {
-                // Auto login
+                // Auto login, chuyển hướng về trang trước
                 $array_user = [
                     'userid' => $userid,
                     'username' => $array_register['username'],
@@ -485,6 +497,7 @@ if ($checkss == $array_register['checkss']) {
                 $nv_redirect = nv_redirect_decrypt($nv_redirect);
                 $url = !empty($nv_redirect) ? $nv_redirect : NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name;
             } else {
+                // Tài khoản sẵn sàng login thì chuyển hướng về trang đăng nhập
                 $url = NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=login';
                 if (!empty($nv_redirect)) {
                     $url .= '&nv_redirect=' . $nv_redirect;
@@ -498,10 +511,9 @@ if ($checkss == $array_register['checkss']) {
                 nv_user_register_callback($userid); // phpcs:ignore
             }
 
-            $nv_redirect = '';
             reg_result([
                 'status' => 'ok',
-                'input' => nv_url_rewrite($url, true),
+                'redirect' => nv_url_rewrite($url, true),
                 'mess' => $nv_Lang->getModule('register_ok')
             ]);
         }

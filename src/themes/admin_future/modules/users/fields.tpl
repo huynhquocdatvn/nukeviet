@@ -18,8 +18,9 @@
             <div class="row mb-3" id="row_field_id">
                 <label for="field_id" class="col-sm-4 col-lg-3 col-form-label text-sm-end">{$LANG->getModule('field_id')} <span class="text-danger">(*)</span></label>
                 <div class="col-sm-8 col-lg-6 col-xxl-5">
-                    <input class="form-control" type="text" value="{$DATAFORM.field}" name="field" id="field_id" maxlength="50" required autocomplete="off">
-                    <div class="form-text">{$LANG->getModule('field_id_note')}</div>
+                    <input class="form-control" type="text" value="{$DATAFORM.field}" name="field" id="field_id" maxlength="50" required autocomplete="off"
+                        pattern="[a-zA-Z][a-zA-Z0-9_]*" title="{$LANG->getModule('field_error_start')}">
+                    <div class="form-text">{$LANG->getModule('field_id_note')}. {$LANG->getModule('field_error_start')}</div>
                     <div class="invalid-feedback"></div>
                 </div>
             </div>
@@ -147,6 +148,25 @@
                         <label class="form-check-label" for="m_{$mt.key}">{$mt.value}</label>
                         {if $mt.has_input}
                         <input class="form-control mt-1" type="text" value="{$mt.match_value}" name="match_{$mt.key}"{if not $mt.checked} disabled{/if} autocomplete="off">
+                        {/if}
+                        {if $mt.key eq 'callback'}
+                        <div class="form-text">
+                            {$LANG->getModule('field_match_type_callback_note')}.
+                            <a href="#" data-toggle="modalShowByObj" data-obj="#li_{$mt.key}_view">{$LANG->getModule('field_match_type_callback_view')}</a>
+                            <div class="d-none" id="li_{$mt.key}_view" title="{$LANG->getModule('field_match_type_callback_list')}">
+                                {if empty($CALLBACK_FUNCTION_LIST)}
+                                <div class="alert alert-warning mb-0" role="alert">{$LANG->getModule('field_match_type_callback_list_empty')}</div>
+                                {else}
+                                <div class="row">
+                                    {foreach from=$CALLBACK_FUNCTION_LIST item=func}
+                                    <div class="col-6 text-break">
+                                        <code>{$func}</code>
+                                    </div>
+                                    {/foreach}
+                                </div>
+                                {/if}
+                            </div>
+                        </div>
                         {/if}
                     </div>
                     {/foreach}
@@ -288,9 +308,9 @@
                 <table class="table table-bordered mb-0">
                     <thead>
                         <tr>
-                            <th class="text-nowrap">{$LANG->getModule('field_options_choicesql_module')}</th>
-                            <th class="text-nowrap">{$LANG->getModule('field_options_choicesql_table')}</th>
-                            <th class="text-nowrap">{$LANG->getModule('field_options_choicesql_column')}</th>
+                            <th class="text-nowrap" style="width: 20%;">{$LANG->getModule('field_options_choicesql_module')}</th>
+                            <th class="text-nowrap" style="width: 30%;">{$LANG->getModule('field_options_choicesql_table')}</th>
+                            <th class="text-nowrap" style="width: 50%;">{$LANG->getModule('field_options_choicesql_column')}</th>
                         </tr>
                     </thead>
                     <tbody>

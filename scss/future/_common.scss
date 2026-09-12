@@ -31,6 +31,13 @@
   }
 }
 
+// Pagination
+.pagination-wrap {
+  .pagination {
+    margin-bottom: 0;
+  }
+}
+
 // Thông báo phiên đăng nhập hết hạn
 .timeoutsess {
   position: fixed;
@@ -76,6 +83,31 @@
   }
 }
 
+// Ảnh đại diện dạng chữ khi tài khoản chưa tải lên ảnh
+.avatar-letters {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: $white;
+  font-weight: $font-weight-semibold;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
+  font-size: 1rem;
+
+  // Vòng tròn từ 80px trở lên
+  &.avatar-letters-lg {
+    font-size: 2rem;
+  }
+
+  // Vòng tròn cỡ 25px đến 30px
+  &.avatar-letters-sm {
+    font-size: .75rem;
+  }
+}
+
 .ps-with-fw-icon {
   padding-left: calc(1.25em + 1rem - 2px);
 }
@@ -108,6 +140,18 @@
     height: 1em;
     margin: 0 -3px;
     animation: badge-new-shake 1s infinite ease-in-out;
+  }
+}
+
+// Border responsive
+@each $name, $width in $grid-breakpoints {
+  @if $width > 0 {
+    $infix: breakpoint-infix($name, $grid-breakpoints);
+    @include media-breakpoint-up($name, $grid-breakpoints) {
+      .border#{$infix}-start {
+        border-left: var(--#{$prefix}border-width) var(--#{$prefix}border-style) var(--#{$prefix}border-color) !important;
+      }
+    }
   }
 }
 

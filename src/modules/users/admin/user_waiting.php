@@ -345,29 +345,30 @@ if ($nv_Request->isset_request('userid', 'get')) {
             }
         }
 
-        if (empty($post['photo'])) {
-            $reg_attribs = !empty($userdata['openid_info']) ? unserialize(nv_base64_decode($userdata['openid_info']), NV_UNSERIALIZE_SAFE) : [];
-            if (!empty($reg_attribs['photo'])) {
-                $upload = new NukeViet\Files\Upload(['images'], $global_config['forbid_extensions'], $global_config['forbid_mimes'], NV_UPLOAD_MAX_FILESIZE, NV_MAX_WIDTH, NV_MAX_HEIGHT);
-                $upload->setLanguage(\NukeViet\Core\Language::$lang_global);
-                $upload_info = $upload->save_urlfile($reg_attribs['photo'], NV_UPLOADS_REAL_DIR . '/' . $module_upload, false);
+        // Thông tin OAuth lưu khi đăng ký, dùng cho cả ảnh đại diện và bảng _openid
+        $reg_attribs = !empty($userdata['openid_info']) ? json_decode($userdata['openid_info'], true) : [];
 
-                if (empty($upload_info['error'])) {
-                    $basename = change_alias($post['username']) . '.' . nv_getextension($upload_info['basename']);
-                    $newname = $basename;
-                    $fullname = $upload_info['name'];
+        // Lấy ảnh đại diện từ OAuth nếu admin không chọn ảnh khác
+        if (empty($post['photo']) and !empty($reg_attribs['photo'])) {
+            $upload = new NukeViet\Files\Upload(['images'], $global_config['forbid_extensions'], $global_config['forbid_mimes'], NV_UPLOAD_MAX_FILESIZE, NV_MAX_WIDTH, NV_MAX_HEIGHT);
+            $upload->setLanguage(\NukeViet\Core\Language::$lang_global);
+            $upload_info = $upload->save_urlfile($reg_attribs['photo'], NV_UPLOADS_REAL_DIR . '/' . $module_upload, false);
 
-                    $i = 1;
-                    while (file_exists(NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $newname)) {
-                        $newname = preg_replace('/(.*)(\.[a-zA-Z0-9]+)$/', '\1_' . $i . '\2', $basename);
-                        ++$i;
-                    }
+            if (empty($upload_info['error'])) {
+                $basename = change_alias($post['username']) . '.' . nv_getextension($upload_info['basename']);
+                $newname = $basename;
+                $fullname = $upload_info['name'];
 
-                    $check = nv_renamefile($fullname, NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $newname);
+                $i = 1;
+                while (file_exists(NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $newname)) {
+                    $newname = preg_replace('/(.*)(\.[a-zA-Z0-9]+)$/', '\1_' . $i . '\2', $basename);
+                    ++$i;
+                }
 
-                    if ($check[0] == 1) {
-                        $post['photo'] = substr(NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $newname, strlen(NV_ROOTDIR . '/'));
-                    }
+                $check = nv_renamefile($fullname, NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $newname);
+
+                if ($check[0] == 1) {
+                    $post['photo'] = substr(NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $newname, strlen(NV_ROOTDIR . '/'));
                 }
             }
         }
@@ -421,9 +422,13 @@ if ($nv_Request->isset_request('userid', 'get')) {
         }
         // Lưu vào bảng OpenID
         if (!empty($reg_attribs)) {
-            $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid (userid, server, opid, id, email) VALUES (:userid, :server, :opid, :id, :email)');
+            $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid (
+                userid, openid, opid, id, email
+            ) VALUES (
+                :userid, :openid, :opid, :id, :email
+            )');
             $stmt->bindValue(':userid', $user_id, PDO::PARAM_INT);
-            $stmt->bindValue(':server', $reg_attribs['server'], PDO::PARAM_STR);
+            $stmt->bindValue(':openid', $reg_attribs['server'], PDO::PARAM_STR);
             $stmt->bindValue(':opid', $reg_attribs['opid'], PDO::PARAM_STR);
             $stmt->bindValue(':id', $reg_attribs['openid'], PDO::PARAM_STR);
             $stmt->bindValue(':email', $reg_attribs['email'], PDO::PARAM_STR);
@@ -504,7 +509,7 @@ if ($nv_Request->isset_request('userid', 'get')) {
                     'gender' => $post['gender'],
                     'lang' => $maillang,
                     'link' => urlRewriteWithDomain(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name, NV_MY_DOMAIN),
-                    'oauth_name' => !empty($userdata['openid_info']) ? ucfirst($reg_attribs['server']) : '',
+                    'oauth_name' => !empty($reg_attribs['server']) ? ucfirst($reg_attribs['server']) : '',
                     'password' => $password,
                     'pass_reset' => $post['pass_reset_request'],
                     'email_reset' => $post['email_reset_request']
@@ -679,7 +684,7 @@ if ($nv_Request->isset_request('userid', 'get')) {
                 $row['filemaxsize'] = $row['limited_values']['file_max_size'] ?? 0;
                 $row['filemaxsize_format'] = nv_convertfromBytes($row['limited_values']['file_max_size'] ?? 0);
                 $row['filemaxnum'] = $row['limited_values']['maxnum'] ?? 0;
-                $row['csrf'] = csrf_create($admin_info['admin_id'] . '_' . $module_name . '_' . $row['field']);
+                $row['csrf'] = csrf_create($module_name . '_field_' . $row['field']);
                 $row['url_module'] = NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name;
                 $row['widthlimit'] = image_size_info($row['limited_values']['widthlimit'] ?? '', 'width');
                 $row['heightlimit'] = image_size_info($row['limited_values']['heightlimit'] ?? '', 'height');
@@ -799,7 +804,7 @@ if (!empty($method) and isset($methods[$method]) and !empty($methodvalue)) {
     $methods[$method]['selected'] = true;
     $table_caption = $nv_Lang->getModule('search_page_title');
     $ar_where[] = $methods[$method]['sql'] . ' LIKE :methodvalue';
-    $params[':methodvalue'] = ['%' . $db->dblikeescape($methodvalue) . '%', PDO::PARAM_STR];
+    $params[':methodvalue'] = ['%' . $db->dblikeescape($methodvalue, true) . '%', PDO::PARAM_STR];
 }
 
 $page = $nv_Request->get_page('page', 'get', 1);

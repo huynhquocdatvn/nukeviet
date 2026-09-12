@@ -129,7 +129,7 @@ function nv_save_file_config_global()
             if (preg_match('/^\d+$/', $c_config_value)) {
                 $content_config .= "define('" . strtoupper($c_config_name) . "', " . $c_config_value . ");\n";
             } else {
-                $content_config .= "define('" . strtoupper($c_config_name) . "', '" . $c_config_value . "');\n";
+                $content_config .= "define('" . strtoupper($c_config_name) . "', " . var_export($c_config_value, true) . ");\n";
             }
             if ($c_config_name == 'nv_allowed_html_tags') {
                 $allowed_html_tags = $c_config_value;
@@ -163,8 +163,8 @@ function nv_save_file_config_global()
     $config_variable['error_log_fileext'] = NV_LOGS_EXT;
 
     $config_name_array = ['file_allowed_ext', 'forbid_extensions', 'forbid_mimes', 'allow_sitelangs', 'allow_request_mods', 'config_sso'];
-    $config_name_json = ['crosssite_valid_domains', 'crosssite_valid_ips', 'crosssite_allowed_variables', 'crossadmin_valid_domains', 'crossadmin_valid_ips', 'domains_whitelist', 'ip_allow_null_origin', 'zaloWebhookIPs', 'end_url_variables', 'cdn_url', 'region'];
-    $config_name_encrypted = ['redis_password', 'fpt_user_pass', 'smtp_password'];
+    $config_name_json = ['crosssite_valid_domains', 'crosssite_valid_ips', 'crosssite_allowed_variables', 'crossadmin_valid_domains', 'crossadmin_valid_ips', 'domains_whitelist', 'ip_allow_null_origin', 'zaloWebhookIPs', 'end_url_variables', 'cdn_url', 'region', 'trusted_proxies'];
+    $config_name_encrypted = ['redis_password', 'ftp_user_pass', 'smtp_password'];
 
     foreach ($config_variable as $c_config_name => $c_config_value) {
         if (in_array($c_config_name, $config_name_array, true)) {
@@ -203,7 +203,7 @@ function nv_save_file_config_global()
                 $content_config .= "\$global_config['" . $c_config_name . "'] = " . nv_var_export($value) . ";\n";
             }
         } elseif (in_array($c_config_name, $config_name_encrypted, true) and !empty($c_config_value)) {
-            $content_config .= "\$global_config['" . $c_config_name . "'] = '" . ($crypt->decrypt($c_config_value) ?? '') . "';\n";
+            $content_config .= "\$global_config['" . $c_config_name . "'] = " . var_export($crypt->decrypt($c_config_value) ?? '', true) . ";\n";
         } else {
             if (preg_match('/^(0|[1-9][0-9]*)$/', $c_config_value) and $c_config_name != 'facebook_client_id') {
                 $content_config .= "\$global_config['" . $c_config_name . "'] = " . $c_config_value . ";\n";
@@ -212,7 +212,7 @@ function nv_save_file_config_global()
                 if (!preg_match("/^[a-z0-9\-\_\.\,\;\:\@\/\\s]+$/i", $c_config_value) and $c_config_name != 'my_domains') {
                     $c_config_value = nv_htmlspecialchars($c_config_value);
                 }
-                $content_config .= "\$global_config['" . $c_config_name . "'] = '" . $c_config_value . "';\n";
+                $content_config .= "\$global_config['" . $c_config_name . "'] = " . var_export($c_config_value, true) . ";\n";
             }
         }
     }
@@ -236,7 +236,13 @@ function nv_save_file_config_global()
     $content_config .= "\$global_config['allowed_html_tags'] = [" . $allowed_html_tags . "];\n";
 
     //Xac dinh cac search_engine
-    $engine_allowed = (file_exists(NV_ROOTDIR . '/' . NV_DATADIR . '/search_engine.xml')) ? nv_object2array(simplexml_load_file(NV_ROOTDIR . '/' . NV_DATADIR . '/search_engine.xml')) : [];
+    $engine_allowed = [];
+    if (file_exists(NV_ROOTDIR . '/' . NV_DATADIR . '/search_engine.xml')) {
+        $xml = simplexml_load_file(NV_ROOTDIR . '/' . NV_DATADIR . '/search_engine.xml');
+        if ($xml !== false) {
+            $engine_allowed = nv_object2array($xml);
+        }
+    }
     $content_config .= "\$global_config['engine_allowed'] = " . nv_var_export($engine_allowed) . ";\n";
     $content_config .= "\n";
 
@@ -325,7 +331,7 @@ function nv_geVersion($updatetime = 3600)
                 'Referer' => NV_MY_DOMAIN,
             ],
             'body' => [
-                'lang' > NV_LANG_INTERFACE,
+                'lang' => NV_LANG_INTERFACE,
                 'basever' => $global_config['version'],
                 'mode' => 'getsysver'
             ]
@@ -608,7 +614,7 @@ function nv_getExtVersion($updatetime = 3600)
                     'Referer' => NV_MY_DOMAIN,
                 ],
                 'body' => [
-                    'lang' > NV_LANG_INTERFACE,
+                    'lang' => NV_LANG_INTERFACE,
                     'basever' => $global_config['version'],
                     'mode' => 'checkextver',
                     'ids' => implode(',', $array_ext_ids),
@@ -998,8 +1004,8 @@ function nv_update_robots($robots_config, bool $save = false, array $config = []
         $content_config = "<?php\n\n";
         $content_config .= NV_FILEHEAD . "\n\n";
         $content_config .= "if (!defined('NV_MAINFILE')) {\n    exit('Stop!!!');\n}\n\n";
-        $content_config .= "\$cache = '" . serialize($robots_data) . "';\n";
-        $content_config .= "\$cache_other = '" . serialize($robots_other) . "';\n";
+        $content_config .= "\$cache = " . var_export(serialize($robots_data), true) . ";\n";
+        $content_config .= "\$cache_other = " . var_export(serialize($robots_other), true) . ";\n";
         $check = file_put_contents($cache_file, $content_config, LOCK_EX);
 
         return [$check, $content_config];

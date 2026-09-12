@@ -126,7 +126,8 @@ class Error
             'day' => gmdate('Y-m-d', NV_CURRENTTIME), // Prefix của file log, Lấy cố định GMT, không theo múi giờ
             'error_date' => date('r', NV_CURRENTTIME), // Thời gian xảy ra lỗi, Lấy theo múi giờ của client (tùy cấu hình)
             'month' => gmdate('Y-m', NV_CURRENTTIME), // Prefix theo tháng log 256, Lấy cố định GMT, không theo múi giờ,
-            'ip' => Ips::$remote_ip,
+            'ip' => Ips::$remote_ip, // IP thật của khách
+            'remote_addr' => Ips::$remote_addr, // IP kết nối trực tiếp, không giả mạo được bằng header
             'request' => substr(Site::getEnv(['UNENCODED_URL', 'REQUEST_URI']), 0, 500),
             'useragent' => trim(substr(Site::getEnv('HTTP_USER_AGENT'), 0, 500)),
             'server_name' => preg_replace('/(\:[0-9]+)$/', '', preg_replace('/^[a-z]+\:\/\//i', '', trim(Site::getEnv(['HTTP_HOST', 'SERVER_NAME', 'Host'])))),
@@ -217,7 +218,7 @@ class Error
     }
 
     /**
-     * format_str()
+     * Chuẩn hóa \ thành / cắt bỏ path tuyệt đối của server
      *
      * @param mixed $str
      * @return string|string[]|null
@@ -226,9 +227,8 @@ class Error
     {
         $str = str_replace('\\', '/', $str);
         $str = preg_replace('/\/{2,}/', '/', $str);
-        $str = str_replace(NV_ROOTDIR, '', $str);
 
-        return str_replace(['[', ']'], ['&lbrack;', '&rbrack;'], $str);
+        return str_replace(NV_ROOTDIR, '', $str);
     }
 
     /**
@@ -263,6 +263,12 @@ class Error
         $content['time'] = $this->cl['error_date'];
         $content['server'] = $this->cl['server_name'];
         $content['ip'] = $this->cl['ip'];
+
+        // Ghi thêm IP kết nối trực tiếp khi nó khác IP khách
+        if ($this->cl['remote_addr'] !== $this->cl['ip']) {
+            $content['remote_addr'] = $this->cl['remote_addr'];
+        }
+
         $content['errno'] = $this->errno . ' (' . self::$errortype[$this->errno] . ')';
         $content['errstr'] = $this->errstr;
         if (!empty($this->errfile)) {
@@ -300,7 +306,7 @@ class Error
         $error_file = $this->cfg['error_log_256'] . '/' . $this->cl['month'] . '_' . $error_code . '.' . $this->cfg['error_log_fileext'];
 
         if ($this->cfg['error_set_logs'] and !file_exists($error_file)) {
-            $content = json_encode($this->_log_content(), NV_JSON_ENCODE);
+            $content = json_encode($this->_log_content(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
             file_put_contents($error_file, $content, FILE_APPEND);
         }
 
@@ -316,10 +322,12 @@ class Error
         }
 
         $contents = file_get_contents(NV_ROOTDIR . '/' . NV_ASSETS_DIR . '/tpl/error.tpl');
-        $contents = str_replace('[PAGE_TITLE]', self::$errortype[$this->errno], $contents);
-        $contents = str_replace('[ERRSTR]', nl2br($this->errstr), $contents);
-        $contents = str_replace('[CODE]', $error_code, $contents);
-        $contents = str_replace('[EMAIL]', $email, $contents);
+        $contents = strtr($contents, [
+            '[PAGE_TITLE]' => self::$errortype[$this->errno],
+            '[ERRSTR]' => nl2br(htmlspecialchars($this->errstr, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')),
+            '[CODE]' => $error_code,
+            '[EMAIL]' => $email
+        ]);
 
         header('Content-Type: text/html; charset=utf-8');
         if (defined('NV_ADMIN') or !defined('NV_ANTI_IFRAME') or NV_ANTI_IFRAME != 0) {
@@ -359,7 +367,7 @@ class Error
             $content['backtrace'] = $trace;
         }
 
-        $content = json_encode($content, NV_JSON_ENCODE);
+        $content = json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         $content .= "\n";
         if (!$this->cfg['error_separate_file']) {
             $content .= self::LOG_DELIMITER . "\n";
@@ -379,7 +387,7 @@ class Error
      */
     private function _send()
     {
-        $content = json_encode($this->_log_content(), NV_JSON_ENCODE) . "\n";
+        $content = json_encode($this->_log_content(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
         $content .= self::LOG_DELIMITER . "\n";
         $error_log_file = $this->cfg['error_log_path'] . '/sendmail.' . $this->cfg['error_log_fileext'];
         error_log($content, 3, $error_log_file);
@@ -401,10 +409,10 @@ class Error
         }
 
         if ($display) {
-            $info = nl2br($this->errstr);
+            $info = nl2br(htmlspecialchars($this->errstr, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
             if ($this->errno != E_USER_ERROR and $this->errno != E_USER_WARNING and $this->errno != E_USER_NOTICE) {
                 if (!empty($this->errfile)) {
-                    $info .= ' in file ' . $this->errfile;
+                    $info .= ' in file ' . htmlspecialchars($this->errfile, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
                 }
                 if (!empty($this->errline)) {
                     $info .= ' on line ' . $this->errline;
@@ -492,7 +500,7 @@ class Error
             $this->log_control();
 
             if (NV_DEBUG) {
-                exit('An error occurred while loading the page:<br /><pre><code>' . print_r($error, true) . '</code></pre>');
+                exit('An error occurred while loading the page:<br /><pre><code>' . htmlspecialchars(print_r($error, true), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code></pre>');
             }
 
             $this->displayErrorPage();
@@ -530,13 +538,13 @@ class Error
         }
 
         if (NV_DEBUG) {
-            exit('An error occurred while loading the page:<br /><pre><code>' . print_r([
+            exit('An error occurred while loading the page:<br /><pre><code>' . htmlspecialchars(print_r([
                 'type' => get_class($exception),
                 'message' => self::format_str($exception->getMessage()),
                 'file' => self::format_str($exception->getFile()),
                 'line' => $exception->getLine(),
                 'trace' => self::format_str($exception->getTraceAsString())
-            ], true) . '</code></pre>');
+            ], true), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</code></pre>');
         }
 
         $this->displayErrorPage();

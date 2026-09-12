@@ -132,7 +132,7 @@ function nv_fix_cat_order($parentid = 0, $order = 0, $lev = 0)
             $sql .= ", subcatid=:subcatid";
         }
         $sql .= " WHERE catid=:catid";
-        
+
         $stmt = $db->prepare($sql);
         $stmt->bindValue(':numsubcat', $numsubcat, PDO::PARAM_INT);
         if ($numsubcat > 0) {
@@ -200,10 +200,7 @@ function nv_fix_source()
 }
 
 /**
- * nv_news_fix_block()
- *
  * @param mixed $bid
- * @param bool  $repairtable
  */
 function nv_news_fix_block($bid)
 {
@@ -378,7 +375,6 @@ function nv_get_mod_countrows()
 }
 
 /**
- * nv_get_mod_tags()
  * Tìm tags cho bài viết dựa vào thư viện tags
  *
  * @param mixed $content
@@ -388,6 +384,7 @@ function nv_get_mod_tags($content)
 {
     global $db, $module_data;
 
+    $content = preg_replace('/<[^>]*>/', ' ', $content);
     $content = strip_tags($content);
     $content = nv_unhtmlspecialchars($content);
     $content = strip_punctuation($content);
@@ -400,34 +397,61 @@ function nv_get_mod_tags($content)
     $ts = array_map(function ($t) {
         return preg_replace('/([\W])/u', '\\\\$1', $t);
     }, $ts);
-    $ts = implode('|', $ts);
 
-    $stmt = $db->prepare("SELECT keywords FROM " . NV_PREFIXLANG . "_" . $module_data . "_tags WHERE keywords REGEXP :p1 OR keywords REGEXP :p2 OR keywords REGEXP :p3 OR keywords REGEXP :p4");
-    $stmt->bindValue(':p1', '^' . $ts . '$', PDO::PARAM_STR);
-    $stmt->bindValue(':p2', '^' . $ts . ',', PDO::PARAM_STR);
-    $stmt->bindValue(':p3', ',' . $ts . ',', PDO::PARAM_STR);
-    $stmt->bindValue(':p4', ',' . $ts . '$', PDO::PARAM_STR);
-    $stmt->execute();
-    
-    $ts = [];
-    while ($_row_tag = $stmt->fetch()) {
-        $keyword = array_map('trim', explode(',', $_row_tag['keywords']));
-        $keyword = array_map('nv_preg_quote', $keyword);
-        $ts = array_merge($ts, $keyword);
-    }
-    $stmt->closeCursor();
-
-    $tags = [];
-    if (!empty($ts)) {
-        $ts = implode('|', $ts);
-        unset($matches);
-        preg_match_all('/(' . $ts . ')/', $content, $matches);
-        if (!empty($matches[1])) {
-            $tags = array_unique($matches[1]);
+    /**
+     * Lấy các tag có chứa ít nhất một từ của bài viết.
+     * Chia các từ của bài viết thành nhiều chunks, mỗi chunk dài tối đa 2000 ký tự.
+     * keywords trong bảng tags có thể là cụm nhiều từ, còn $ts chỉ là một từ đơn.
+     */
+    $patterns = [];
+    $batch = [];
+    $length = 0;
+    foreach ($ts as $t) {
+        if (!empty($batch) and $length + strlen($t) > 2000) {
+            $patterns[] = implode('|', $batch);
+            $batch = [];
+            $length = 0;
         }
+        $batch[] = $t;
+        $length += strlen($t) + 1;
+    }
+    if (!empty($batch)) {
+        $patterns[] = implode('|', $batch);
     }
 
-    return !empty($tags) ? array_values($tags) : [];
+    if (empty($patterns)) {
+        return [];
+    }
+
+    /**
+     * Với những tag tìm được, phân tách từ khóa của nó bởi dấu phảy ra,
+     * và xác nhận bằng cách kiểm tra từ khóa đó xuất hiện trong nội dung bài viết.
+     */
+    $tags = [];
+    $stmt = $db->prepare('SELECT keywords FROM ' . NV_PREFIXLANG . '_' . $module_data . '_tags WHERE keywords REGEXP :p');
+    foreach ($patterns as $pattern) {
+        $stmt->bindValue(':p', $pattern, PDO::PARAM_STR);
+        $stmt->execute();
+
+        while ($_row_tag = $stmt->fetch()) {
+            foreach (explode(',', $_row_tag['keywords']) as $keyword) {
+                $keyword = trim($keyword);
+                if ($keyword === '' or isset($tags[$keyword])) {
+                    continue;
+                }
+                $pos = strpos($content, $keyword);
+                if ($pos !== false) {
+                    $tags[$keyword] = $pos;
+                }
+            }
+        }
+        $stmt->closeCursor();
+    }
+
+    // Sắp xếp theo thứ tự xuất hiện trong nội dung bài viết, từ đầu đến cuối
+    asort($tags, SORT_NUMERIC);
+
+    return array_map('strval', array_keys($tags));
 }
 
 /**
@@ -474,4 +498,52 @@ function setTagKeywords($keywords, $isArr = false)
     }
 
     return implode(',', $keywords);
+}
+
+/**
+ * Lấy nút sửa bài viết
+ *
+ * @param array $info cần có ít nhất id, và listcatid
+ * @return string
+ */
+function nv_link_edit_page(array $info)
+{
+    global $nv_Lang, $module_name;
+
+    if (!nv_check_edit_page($info)) {
+        return '';
+    }
+    $link = '<a class="btn btn-primary btn-xs btn_edit" href="' . NV_BASE_ADMINURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name . '&amp;' . NV_OP_VARIABLE . '=content&amp;id=' . $info['id'] . '"><i class="fa fa-edit fa-fw"></i> ' . $nv_Lang->getGlobal('edit') . '</a>';
+    return $link;
+}
+
+/**
+ * Lấy nút xóa bài viết
+ *
+ * @param array $info cần có ít nhất id, và listcatid
+ * @param int $detail
+ * @return string
+ */
+function nv_link_delete_page(array $info, int $detail = 0)
+{
+    global $nv_Lang, $admin_info, $module_name;
+
+    if (!nv_check_delete_page($info)) {
+        return '';
+    }
+
+    $link = '<a class="btn btn-danger btn-xs" href="#" data-toggle="nv_del_content" data-id="' . $info['id'] . '" data-checkss="' . csrf_create($admin_info['admin_id'] . '_' . $module_name . '_' . $info['id']) . '" data-adminurl="' . NV_BASE_ADMINURL . '" data-detail="' . $detail . '"><em class="fa fa-trash-o margin-right"></em> ' . $nv_Lang->getGlobal('delete') . '</a>';
+    return $link;
+}
+
+/**
+ * @param int $article_id
+ * @param int $history_id
+ * @param int $history_time
+ * @return string
+ */
+function get_article_restore_csrf_key(int $article_id, int $history_id, int $history_time): string
+{
+    global $admin_info, $module_name;
+    return $admin_info['admin_id'] . '_' . $module_name . '_' . $article_id . '_' . $history_id . '_' . $history_time;
 }

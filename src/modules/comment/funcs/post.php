@@ -37,7 +37,7 @@ $area = $nv_Request->get_title('area', 'post', '');
 $id = $nv_Request->get_title('id', 'post', '');
 $allowed_comm = $nv_Request->get_title('allowed', 'post');
 $checkss = $nv_Request->get_title('checkss', 'post');
-if (empty($id) or $module_config[$module]['activecomm'] != 1 or $checkss != md5($module . '-' . $area . '-' . $id . '-' . $allowed_comm . '-' . NV_CACHE_PREFIX)) {
+if (empty($id) or $module_config[$module]['activecomm'] != 1 or $checkss != md5($module . '-' . $area . '-' . $id . '-' . $allowed_comm . '-' . NV_CHECK_SESSION)) {
     _loadContents(['status' => 'ERR', 'mess' => $nv_Lang->getModule('comment_unsuccess')]);
 }
 
@@ -204,10 +204,7 @@ if (!empty($module_config[$module]['allowattachcomm']) and isset($_FILES['fileat
         ]);
     }
 
-    mt_srand(microtime(true) * 1000000);
-    $maxran = 1000000;
-    $random_num = random_int(0, $maxran);
-    $random_num = md5($random_num);
+    $random_num = md5(random_bytes(16));
     $nv_pathinfo_filename = nv_pathinfo_filename($upload_info['name']);
     $new_name = NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $dir . '/' . $nv_pathinfo_filename . '.' . $random_num . '.' . $upload_info['ext'];
 

@@ -22,13 +22,13 @@ if ($nv_Request->isset_request('loadBlocks, bid', 'post')) {
         'error' => 1,
         'text' => 'Wrong session!!!'
     ];
-    if ($nv_Request->get_title('checkss', 'post', '') !== NV_CHECK_SESSION) {
+    if (!csrf_check($nv_Request->get_string('checkss', 'post'), $csrf_key)) {
         nv_jsonOutput($respon);
     }
 
-    $module = $nv_Request->get_string('loadBlocks', 'post', '');
+    $module = $nv_Request->get_title('loadBlocks', 'post', '');
     $bid = $nv_Request->get_int('bid', 'post', 0);
-    $selectthemes = $nv_Request->get_string('selectthemes', 'post', $global_config['site_theme']);
+    $selectthemes = $nv_Request->get_title('selectthemes', 'post', $global_config['site_theme']);
 
     $respon['error'] = 0;
     $respon['html'] = loadblock($module, $bid, $selectthemes);
@@ -39,7 +39,7 @@ if ($nv_Request->isset_request('loadBlocks, bid', 'post')) {
 $functionid = $nv_Request->get_int('func', 'get');
 $blockredirect = $nv_Request->get_string('blockredirect', 'get');
 
-$selectthemes = $nv_Request->get_string('selectthemes', 'post,get', $global_config['site_theme']);
+$selectthemes = $nv_Request->get_title('selectthemes', 'post,get', $global_config['site_theme']);
 if (!(preg_match($global_config['check_theme'], $selectthemes) or preg_match($global_config['check_theme_mobile'], $selectthemes))) {
     nv_error404();
 }
@@ -97,7 +97,7 @@ if ($nv_Request->isset_request('get_dtime_details', 'post')) {
         'error' => 1,
         'text' => 'Wrong session!!!'
     ];
-    if ($nv_Request->get_title('checkss', 'post', '') !== NV_CHECK_SESSION) {
+    if (!csrf_check($nv_Request->get_string('checkss', 'post'), $csrf_key)) {
         nv_jsonOutput($respon);
     }
 
@@ -112,8 +112,14 @@ if ($nv_Request->isset_request('get_dtime_details', 'post')) {
 
 $groups_list = nv_groups_list();
 
-$checkss = md5(NV_CHECK_SESSION . '_' . $module_name . '_' . $op . '_' . $row['bid']);
-if ($checkss == $nv_Request->get_string('checkss', 'post')) {
+if ($nv_Request->isset_request('checkss', 'post')) {
+    if (!csrf_check($nv_Request->get_string('checkss', 'post'), $csrf_key)) {
+        nv_jsonOutput([
+            'status' => 'error',
+            'mess' => $nv_Lang->getGlobal('error_checkss')
+        ]);
+    }
+
     $list_file_name = $nv_Request->get_title('file_name', 'post', '');
     $array_file_name = explode('|', $list_file_name);
     if (!isset($array_file_name[1])) {
@@ -146,9 +152,9 @@ if ($checkss == $nv_Request->get_string('checkss', 'post')) {
 
         // Cho phép lấy cả block trong giao diện
         $checks = [
-            'php' => NV_ROOTDIR . '/themes/' . $global_config['site_theme'] . '/modules/' . $mod_file . '/' . $file_name,
-            'ini' => NV_ROOTDIR . '/themes/' . $global_config['site_theme'] . '/modules/' . $mod_file . '/' . $matches[1] . '.' . $matches[2] . '.ini',
-            'json' => NV_ROOTDIR . '/themes/' . $global_config['site_theme'] . '/modules/' . $mod_file . '/' . $matches[1] . '.' . $matches[2] . '.json'
+            'php' => NV_ROOTDIR . '/themes/' . $selectthemes . '/modules/' . $mod_file . '/' . $file_name,
+            'ini' => NV_ROOTDIR . '/themes/' . $selectthemes . '/modules/' . $mod_file . '/' . $matches[1] . '.' . $matches[2] . '.ini',
+            'json' => NV_ROOTDIR . '/themes/' . $selectthemes . '/modules/' . $mod_file . '/' . $matches[1] . '.' . $matches[2] . '.json'
         ];
         foreach ($checks as $check_type => $path) {
             if (!file_exists($path)) {
@@ -660,7 +666,7 @@ $tpl->assign('OP', $op);
 $tpl->assign('TEMPLATE', $template);
 
 $row['link'] = nv_htmlspecialchars($row['link']);
-$row['checkss'] = $checkss;
+$row['checkss'] = csrf_create($csrf_key);
 $row['active_device'] = !empty($row['active']) ? array_map('intval', explode(',', $row['active'])) : [];
 $row['groups_view'] = array_map('intval', explode(',', $row['groups_view']));
 $row['block_global'] = preg_match('/^global\.([a-zA-Z0-9\-\_\.]+)\.php$/', $row['file_name']);

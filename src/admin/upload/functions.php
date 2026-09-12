@@ -43,7 +43,7 @@ if (defined('NV_IS_SPADMIN')) {
 }
 
 // Cần có isset($admin_info['admin_id']) để khi cài đặt không báo lỗi
-$_csrf_key = isset($admin_info['admin_id']) ? $admin_info['admin_id'] . '_' . $module_name . '_main' : '';
+$_csrf_key = isset($admin_info['admin_id']) ? $admin_info['admin_id'] . '_' . $module_name : '';
 
 // Các module trong quản trị
 $sql = 'SELECT module FROM ' . NV_AUTHORS_GLOBALTABLE . '_module';
@@ -287,15 +287,20 @@ function nv_get_viewImage($fileName, $refresh = 0)
 
         if (file_exists(NV_ROOTDIR . '/' . $viewFile)) {
             if ($refresh) {
-                @nv_deletefile(NV_ROOTDIR . '/' . $viewFile);
+                nv_deletefile(NV_ROOTDIR . '/' . $viewFile);
             } else {
-                $size = @getimagesize(NV_ROOTDIR . '/' . $viewFile);
+                $size = getimagesize(NV_ROOTDIR . '/' . $viewFile);
 
-                return [
-                    $viewFile,
-                    $size[0],
-                    $size[1]
-                ];
+                if (is_array($size)) {
+                    return [
+                        $viewFile,
+                        $size[0],
+                        $size[1]
+                    ];
+                }
+
+                // Thumbnail file bị hỏng, xóa để tạo lại
+                nv_deletefile(NV_ROOTDIR . '/' . $viewFile);
             }
         }
 
@@ -383,13 +388,12 @@ function nv_get_viewImage($fileName, $refresh = 0)
             return false;
         }
     } else {
-        $size = @getimagesize(NV_ROOTDIR . '/' . $fileName);
-
-        return [
+        $size = getimagesize(NV_ROOTDIR . '/' . $fileName);
+        return is_array($size) ? [
             $fileName,
             $size[0],
             $size[1]
-        ];
+        ] : false;
     }
 
     return false;
@@ -408,7 +412,9 @@ function nv_getFileInfo($pathimg, $file)
     clearstatcache();
 
     unset($matches);
-    preg_match("/([a-zA-Z0-9\.\-\_\\s\(\)]+)\.([a-zA-Z0-9]+)$/", $file, $matches);
+    if (!preg_match("/^([a-zA-Z0-9\.\-\_\\s\(\)]+)\.([a-zA-Z0-9]+)$/", $file, $matches)) {
+        return [];
+    }
 
     $info = [];
     $info['name'] = $file;
@@ -467,7 +473,9 @@ function nv_getFileInfo($pathimg, $file)
         }
     } elseif ($ext == 'svg') {
         $info['type'] = 'image';
-        if (($xml = @simplexml_load_file(NV_ROOTDIR . '/' . $pathimg . '/' . $file)) !== false) {
+        // Đọc nội dung file SVG và phân tích an toàn, chặn XXE attack
+        $svgContent = @file_get_contents(NV_ROOTDIR . '/' . $pathimg . '/' . $file);
+        if ($svgContent !== false && ($xml = @simplexml_load_string($svgContent, 'SimpleXMLElement', LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING)) !== false) {
             $attr = $xml->attributes();
             $maxWidth = $maxHeight = $width = $height = 0;
 
@@ -540,7 +548,7 @@ function nv_filesListRefresh($pathimg)
                     continue;
                 }
 
-                if (preg_match('/([a-zA-Z0-9\.\-\_\\s\(\)]+)\.([a-zA-Z0-9]+)$/', $title)) {
+                if (preg_match('/^([a-zA-Z0-9\.\-\_\\s\(\)]+)\.([a-zA-Z0-9]+)$/', $title)) {
                     $info = nv_getFileInfo($pathimg, $title);
                     $info['did'] = $did;
                     $info['title'] = $title;
@@ -711,7 +719,7 @@ if ($nv_Request->isset_request('dirListRefresh', 'post') and csrf_check($nv_Requ
     foreach ($result_no_exit as $dirname) {
         // Xóa CSDL thư mục không còn tồn tại
         $did = $array_dirname[$dirname];
-        
+
         $stmt_del_f = $db->prepare('DELETE FROM ' . NV_UPLOAD_GLOBALTABLE . '_file WHERE did = :did');
         $stmt_del_f->bindValue(':did', $did, PDO::PARAM_INT);
         $stmt_del_f->execute();

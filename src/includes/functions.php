@@ -109,7 +109,7 @@ function nv_is_myreferer($referer = '')
         '/^[w]+\./'
     ], '', $referer);
 
-    if (preg_match('/^' . nv_preg_quote(NV_SERVER_NAME) . '/', $referer)) {
+    if (preg_match('/^' . nv_preg_quote(NV_SERVER_NAME) . '(\/|:|$)/', $referer)) {
         return 1;
     }
 
@@ -117,22 +117,78 @@ function nv_is_myreferer($referer = '')
 }
 
 /**
- * nv_is_blocker_proxy()
+ * Kiểm tra trang cha đang nhúng site này bằng iframe
+ * có nằm trong danh sách nguồn của chỉ thị frame-ancestors không.
+ * Trang cha được xác định qua referer của lần tải tài liệu iframe đầu tiên, nên trình duyệt
+ * không gửi referer thì coi như không hợp lệ.
  *
- * @param string $is_proxy
- * @param int    $proxy_blocker
+ * @param array $sources Danh sách nguồn lấy từ cấu hình frame_ancestors_hosts
  * @return bool
  */
-function nv_is_blocker_proxy($is_proxy, $proxy_blocker)
+function nv_is_allowed_ancestor($sources = [])
 {
-    if ($proxy_blocker == 1 and $is_proxy == 'Strong') {
-        return true;
-    }
-    if ($proxy_blocker == 2 and ($is_proxy == 'Strong' or $is_proxy == 'Mild')) {
-        return true;
+    global $nv_Request;
+
+    if (empty($sources) or empty($nv_Request->referer_host)) {
+        return false;
     }
 
-    return (bool) ($proxy_blocker == 3 and $is_proxy != 'No');
+    $ref = parse_url($nv_Request->ref_origin);
+    $ref_scheme = isset($ref['scheme']) ? strtolower($ref['scheme']) : '';
+    $ref_host = strtolower($nv_Request->referer_host);
+    // ref_origin đã lược bỏ port mặc định nên phải suy ra lại từ scheme
+    if (isset($ref['port'])) {
+        $ref_port = (string) $ref['port'];
+    } else {
+        $ref_port = $ref_scheme == 'https' ? '443' : ($ref_scheme == 'http' ? '80' : '');
+    }
+
+    foreach ($sources as $source) {
+        $source = strtolower(trim($source));
+        if ($source === '' or substr($source, 0, 1) == "'") {
+            // Bỏ qua các từ khóa dạng 'self', 'none'
+            continue;
+        }
+        if ($source === '*') {
+            return true;
+        }
+        // Nguồn chỉ khai báo scheme, ví dụ https:
+        if (preg_match('/^([a-z][a-z0-9\+\-\.]*):$/', $source, $m)) {
+            if ($m[1] === $ref_scheme) {
+                return true;
+            }
+            continue;
+        }
+        // Tách scheme nếu nguồn có khai báo
+        if (preg_match('/^([a-z][a-z0-9\+\-\.]*):\/\/(.+)$/', $source, $m)) {
+            if ($m[1] !== $ref_scheme) {
+                continue;
+            }
+            $source = $m[2];
+        }
+        // frame-ancestors không so khớp phần path
+        $source = explode('/', $source)[0];
+        // Tách port nếu nguồn có khai báo
+        if (preg_match('/^(.+):([0-9]+|\*)$/', $source, $m)) {
+            $source = $m[1];
+            if ($m[2] !== '*' and $m[2] !== $ref_port) {
+                continue;
+            }
+        }
+        // Ký tự đại diện chỉ khớp tên miền con, không khớp chính tên miền đó
+        if (substr($source, 0, 2) == '*.') {
+            $base = substr($source, 2);
+            if ($base !== '' and substr($ref_host, -strlen($base) - 1) === '.' . $base) {
+                return true;
+            }
+            continue;
+        }
+        if ($source === $ref_host) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -411,7 +467,7 @@ function nv_check_valid_login($login, $max, $min)
  */
 function nv_check_valid_pass($pass, $max, $min)
 {
-    global $nv_Lang, $db_config, $db, $global_config;
+    global $nv_Lang, $db, $global_config;
 
     $pass = trim(strip_tags($pass));
 
@@ -570,9 +626,7 @@ function nv_capcha_txt($seccode, $type = 'captcha')
         return false;
     }
 
-    mt_srand(microtime(true) * 1000000);
-    $maxran = 1000000;
-    $random = random_int(0, $maxran);
+    $random = random_int(0, 1000000);
 
     $seccode = strtoupper($seccode);
     $random_num = $nv_Request->get_string('random_num', 'session', 0);
@@ -581,7 +635,7 @@ function nv_capcha_txt($seccode, $type = 'captcha')
 
     $nv_Request->set_Session('random_num', $random);
 
-    return preg_match('/^[a-zA-Z0-9]{' . NV_GFX_NUM . '}$/', $seccode) and $seccode == substr($rcode, 2, NV_GFX_NUM);
+    return preg_match('/^[a-zA-Z0-9]{' . NV_GFX_NUM . '}$/', $seccode) and hash_equals(substr($rcode, 2, NV_GFX_NUM), $seccode);
 }
 
 /**
@@ -963,6 +1017,104 @@ function nv_show_name_user($first_name, $last_name, $user_name = '', $lang = '')
     $full_name = trim($full_name);
 
     return empty($full_name) ? $user_name : $full_name;
+}
+
+/**
+ * Lấy tối đa 2 ký tự làm ảnh đại diện dạng chữ
+ *
+ * @param string $first_name Tên
+ * @param string $last_name  Họ
+ * @param string $user_name
+ * @return string
+ */
+function nv_user_avatar_letters($first_name, $last_name, $user_name = '')
+{
+    global $global_config;
+
+    $first_name = nv_user_avatar_words((string) $first_name);
+    $last_name = nv_user_avatar_words((string) $last_name);
+
+    // Trường hợp đầy đủ họ và tên
+    if ($first_name !== '' and $last_name !== '') {
+        $first_words = explode(' ', $first_name);
+        $last_words = explode(' ', $last_name);
+
+        if (!empty($global_config['name_show'])) {
+            // Hiển thị Tên - Họ: chữ đầu của tên rồi chữ đầu của họ
+            $letters = nv_substr($first_words[0], 0, 1) . nv_substr($last_words[0], 0, 1);
+        } else {
+            // Hiển thị Họ - Tên: chữ đầu của họ rồi chữ đầu của tên gọi
+            $letters = nv_substr($last_words[0], 0, 1) . nv_substr(end($first_words), 0, 1);
+        }
+
+        return nv_strtoupper($letters);
+    }
+
+    // Khuyết họ hoặc tên
+    $source = $first_name !== '' ? $first_name : $last_name;
+    if ($source !== '') {
+        $words = explode(' ', $source);
+        if (count($words) > 1) {
+            // Nhiều từ: ký tự đầu của từ đầu ghép với ký tự đầu của từ cuối
+            $letters = nv_substr($words[0], 0, 1) . nv_substr(end($words), 0, 1);
+        } else {
+            // Họ tên chỉ có một từ thì chỉ lấy một ký tự
+            $letters = nv_substr($source, 0, 1);
+        }
+
+        return nv_strtoupper($letters);
+    }
+
+    // Không khai báo họ tên thì lùi về tên đăng nhập
+    $source = nv_user_avatar_words((string) $user_name);
+    if ($source === '') {
+        return '';
+    }
+
+    $words = explode(' ', $source);
+    if (count($words) > 1) {
+        $letters = nv_substr($words[0], 0, 1) . nv_substr(end($words), 0, 1);
+    } else {
+        // Tên đăng nhập một từ vẫn lấy hai ký tự đầu
+        $letters = nv_substr($source, 0, 2);
+    }
+
+    return nv_strtoupper($letters);
+}
+
+/**
+ * Chuẩn hóa chuỗi về dạng chỉ còn chữ và số an toàn
+ *
+ * @param string $string
+ * @return string
+ */
+function nv_user_avatar_words($string)
+{
+    $string = strip_tags(html_entity_decode($string, ENT_QUOTES, 'UTF-8'));
+    $words = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $string);
+    if ($words === null) {
+        // Chuỗi không phải UTF-8 hợp lệ, lùi về bộ ký tự ASCII
+        $words = preg_replace('/[^a-zA-Z0-9]+/', ' ', $string);
+    }
+
+    return trim((string) $words);
+}
+
+/**
+ * Sinh màu nền cố định theo tài khoản cho ảnh đại diện dạng chữ. Độ bão hòa và
+ * độ sáng được giữ nguyên để chữ màu trắng luôn đủ tương phản
+ *
+ * @param string $seed
+ * @return string
+ */
+function nv_user_avatar_color($seed)
+{
+    $seed = trim((string) $seed);
+    if ($seed === '') {
+        $seed = 'nukeviet';
+    }
+
+    return 'hsl(' . (abs(crc32(nv_strtolower($seed))) % 360) . ', 60%, 42%)';
 }
 
 /**
@@ -1364,6 +1516,7 @@ function nv_tag2nl($str, $tag = 'p')
  */
 function nv_get_keywords($content, $keyword_limit = 20, $isArr = false)
 {
+    $content = preg_replace('/<[^>]*>/', ' ', $content);
     $content = strip_tags($content);
     $content = nv_unhtmlspecialchars($content);
     $content = strip_punctuation($content);
@@ -1470,15 +1623,16 @@ function mailAddHtml($subject, $body, $gconfigs, $lang)
     $mail_tpl = NV_ROOTDIR . '/' . NV_ASSETS_DIR . '/tpl/mail.tpl';
     $template_tpl = 'default';
     if (!empty($gconfigs['mail_tpl'])) {
+        // Chỉ chấp nhận 2 dạng path tương đối hợp lệ, chặn absolute path
+        // và path traversal nhằm tránh include file PHP/template ngoài ý muốn.
         $path_tpl = '';
-        if (file_exists(NV_ROOTDIR . '/' . $gconfigs['mail_tpl'])) {
+        $allowed = preg_match('#^' . preg_quote(NV_ASSETS_DIR, '#') . '/tpl/[a-zA-Z0-9\-\_]+\.tpl$#', $gconfigs['mail_tpl'])
+            || preg_match('#^themes/[a-zA-Z0-9\-\_]+/system/[a-zA-Z0-9\-\_\.]+\.tpl$#', $gconfigs['mail_tpl']);
+        if ($allowed and file_exists(NV_ROOTDIR . '/' . $gconfigs['mail_tpl'])) {
             $mail_tpl = NV_ROOTDIR . '/' . $gconfigs['mail_tpl'];
             $path_tpl = $gconfigs['mail_tpl'];
-        } elseif (file_exists($gconfigs['mail_tpl'])) {
-            $mail_tpl = $gconfigs['mail_tpl'];
-            $path_tpl = substr($gconfigs['mail_tpl'], strlen(NV_ROOTDIR . '/'));
         }
-        if (preg_match('/\/([a-zA-Z0-9\-\_]+)\/system\//', $path_tpl, $m)) {
+        if (preg_match('/^themes\/([a-zA-Z0-9\-\_]+)\/system\//', $path_tpl, $m)) {
             $template_tpl = get_tpl_dir($m[1], $template_tpl, 'theme_email.php');
         }
     }
@@ -1890,7 +2044,7 @@ function betweenURLs($page, $total, $base_url, $urlappend, &$prevPage, &$nextPag
 /**
  * nv_generate_page()
  *
- * @param string $base_url
+ * @param string|array $base_url
  * @param int    $num_items
  * @param int    $per_page
  * @param int    $on_page
@@ -2311,8 +2465,7 @@ function nv_is_url($url, $isInternal = false)
         return false;
     }
 
-    $sanitizer = new NukeViet\Core\Sanitizer();
-    if (!$sanitizer->xssValid($url)) {
+    if (!NukeViet\Core\Sanitizer::xssValid($url)) {
         return false;
     }
 
@@ -2434,9 +2587,7 @@ function url_get_contents($url)
         'Mozilla/4.8 [en] (Windows NT 6.0; U)',
         'Opera/9.25 (Windows NT 6.0; U; en)'
     ];
-    mt_srand(microtime(true) * 1000000);
-    $rand = array_rand($userAgents);
-    $agent = $userAgents[$rand];
+    $agent = $userAgents[array_rand($userAgents)];
 
     $args = [
         'headers' => [
@@ -2714,8 +2865,15 @@ function nv_change_buffer($buffer)
         $buffer = preg_replace('/(<body[^>]*>)/', '$1' . PHP_EOL . '<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=' . $global_config['google_tag_manager'] . '" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>' . PHP_EOL, $buffer, 1);
     }
 
-    if (NV_ANTI_IFRAME and empty($client_info['is_myreferer'])) {
-        $buffer = preg_replace('/(<body[^>]*>)/', '$1' . PHP_EOL . '<' . $script . '>if(window.top!==window.self){document.write="";window.top.location=window.self.location;setTimeout(function(){document.body.innerHTML=""},1);window.self.onload=function(){document.body.innerHTML=""}};</script>', $buffer, 1);
+    if (NV_ANTI_IFRAME) {
+        // Trang cha là chính site thì luôn hợp lệ, ngoài ra chỉ tha khi khớp danh sách của frame-ancestors
+        $is_allowed_ancestor = $client_info['is_myreferer'] === 1;
+        if (!$is_allowed_ancestor and ($global_config['frame_ancestors'] ?? 0) == 2) {
+            $is_allowed_ancestor = nv_is_allowed_ancestor(explode(' ', $global_config['frame_ancestors_hosts'] ?? ''));
+        }
+        if (!$is_allowed_ancestor) {
+            $buffer = preg_replace('/(<body[^>]*>)/', '$1' . PHP_EOL . '<' . $script . '>if(window.top!==window.self){document.write="";window.top.location=window.self.location;setTimeout(function(){document.body.innerHTML=""},1);window.self.onload=function(){document.body.innerHTML=""}};</script>', $buffer, 1);
+        }
     }
 
     /**
@@ -2803,7 +2961,7 @@ function nv_change_buffer($buffer)
                 if (count($strdata) == 1) {
                     $strdata = $strdata[0];
                 }
-                $strdata = json_encode($strdata, NV_JSON_ENCODE_SCRIPT);
+                $strdata = json_encode($strdata, NV_JSON_ENCODE_LDJSON);
                 $strdata = '<script type="application/ld+json">' . PHP_EOL . $strdata . PHP_EOL . '</script>';
                 $buffer = preg_replace('/(<\/head[^>]*>)/', PHP_EOL . $strdata . '$1', $buffer, 1);
             }
@@ -2827,7 +2985,9 @@ function parse_csp($json_csp)
     $md5 = 'static_domains-' . $global_config['cdn_url'] . $global_config['nv_static_url'] . $global_config['assets_cdn_url'];
     $md5 = md5($md5);
 
-    $cacheFile = 'csp_' . NV_CACHE_PREFIX . '.cache';
+    // Khu vực quản trị dùng chính sách riêng nên phải tách cache
+    $is_admin = defined('NV_ADMIN');
+    $cacheFile = 'csp_' . ($is_admin ? 'admin_' : '') . NV_CACHE_PREFIX . '.cache';
     if (($cache = $nv_Cache->getItem('settings', $cacheFile)) != false) {
         $_info = unserialize($cache, NV_UNSERIALIZE_SAFE);
         if (!empty($_info['md5']) and $_info['md5'] == $md5) {
@@ -2884,6 +3044,15 @@ function parse_csp($json_csp)
         }
     }
     !empty($static_csp) && $_csp = array_merge_recursive($_csp, $static_csp);
+
+    /**
+     * Khu vực quản trị không bao giờ được phép nhúng từ tên miền khác,
+     * bất kể cấu hình frame-ancestors ngoài site mở tới đâu
+     */
+    if ($is_admin) {
+        $_csp['frame-ancestors'] = ['self' => 1];
+    }
+
     $csp = [];
     if (!empty($_csp)) {
         foreach ($_csp as $directive => $sources) {
@@ -2926,15 +3095,18 @@ function nv_insert_logs($lang = '', $module_name = '', $name_key = '', $note_act
 {
     global $db_config, $db;
 
+    $log_remote_addr = NV_REMOTE_ADDR !== NV_CLIENT_IP ? NV_REMOTE_ADDR : '';
     $sth = $db->prepare('INSERT INTO ' . $db_config['prefix'] . '_logs
-        (lang, module_name, name_key, note_action, link_acess, userid, log_time) VALUES
-        (:lang, :module_name, :name_key, :note_action, :link_acess, :userid, :log_time)');
+        (lang, module_name, name_key, note_action, link_acess, userid, log_ip, log_remote_addr, log_time) VALUES
+        (:lang, :module_name, :name_key, :note_action, :link_acess, :userid, :log_ip, :log_remote_addr, :log_time)');
     $sth->bindValue(':lang', $lang, PDO::PARAM_STR);
     $sth->bindValue(':module_name', $module_name, PDO::PARAM_STR);
     $sth->bindValue(':name_key', $name_key, PDO::PARAM_STR);
     $sth->bindValue(':note_action', $note_action, PDO::PARAM_STR);
     $sth->bindValue(':link_acess', $link_acess, PDO::PARAM_STR);
     $sth->bindValue(':userid', $userid, PDO::PARAM_INT);
+    $sth->bindValue(':log_ip', NV_CLIENT_IP, PDO::PARAM_STR);
+    $sth->bindValue(':log_remote_addr', $log_remote_addr, PDO::PARAM_STR);
     $sth->bindValue(':log_time', NV_CURRENTTIME, PDO::PARAM_INT);
 
     return (bool) ($sth->execute());
@@ -3176,7 +3348,21 @@ function nv_delete_notification($language, $module, $type, $obid)
 {
     global $db, $global_config;
 
-    $in = is_array($obid) ? implode(',', $obid) : $obid;
+    // Chuẩn hóa $obid về danh sách số nguyên dương để tránh SQL Injection.
+    // Hỗ trợ 3 kiểu đầu vào: int, mảng int, chuỗi CSV (vd từ GROUP_CONCAT).
+    if (is_array($obid)) {
+        $obid_list = $obid;
+    } elseif (is_string($obid) and str_contains($obid, ',')) {
+        $obid_list = explode(',', $obid);
+    } else {
+        $obid_list = [$obid];
+    }
+    $obid_list = array_map('intval', $obid_list);
+    if (empty($obid_list)) {
+        return true;
+    }
+    $in = implode(',', $obid_list);
+
     if ($global_config['notification_active']) {
         try {
             $sth = $db->prepare('DELETE FROM ' . NV_NOTIFICATION_GLOBALTABLE . ' WHERE language = :language AND module = :module AND obid IN (' . $in . ') AND type = :type');
@@ -3270,9 +3456,9 @@ function add_notification($args)
         return false;
     }
 
-    $data['receiver_grs'] = !empty($data['receiver_grs']) ? implode(',', $data['receiver_grs']) : '';
+    $data['receiver_grs'] = !empty($data['receiver_grs']) ? implode(',', array_map('intval', $data['receiver_grs'])) : '';
     $data['sender_role'] == 'group' && $data['receiver_grs'] = '';
-    $data['receiver_ids'] = !empty($data['receiver_ids']) ? implode(',', $data['receiver_ids']) : '';
+    $data['receiver_ids'] = !empty($data['receiver_ids']) ? implode(',', array_map('intval', $data['receiver_ids'])) : '';
 
     $contents = [];
     foreach ($data['message'] as $lang => $message) {
@@ -3504,13 +3690,10 @@ function post_async($url, $params = [], $headers = [])
         CURLOPT_POSTFIELDS => $post_string,
         CURLOPT_NOSIGNAL => 1,
         CURLOPT_HTTPHEADER => $_headers,
+        CURLOPT_TIMEOUT_MS => NV_POST_ASYNC_TIMEOUT_MS,
         CURLOPT_FRESH_CONNECT => true
     ];
-    if (version_compare(PHP_VERSION, '7.16.2', '<')) {
-        $options[CURLOPT_TIMEOUT] = NV_POST_ASYNC_TIMEOUT;
-    } else {
-        $options[CURLOPT_TIMEOUT_MS] = NV_POST_ASYNC_TIMEOUT_MS;
-    }
+
     // Bỏ comment 2 dòng dưới nếu muốn kiểm tra tiến trình chạy curl
     // $options[CURLOPT_VERBOSE] = true;
     // $options[CURLOPT_STDERR] = fopen(NV_ROOTDIR . '/curl.txt', 'a+');
@@ -3525,7 +3708,7 @@ function post_async($url, $params = [], $headers = [])
  * nv_local_api()
  *
  * @param string $cmd
- * @param string $params
+ * @param array $params
  * @param string $adminidentity
  * @param string $module
  * @return mixed
@@ -3665,6 +3848,16 @@ function nv_local_api($cmd, $params, $adminidentity = '', $module = '')
  */
 function DKIM_verify($domain, $selector)
 {
+    // Chặn Path Traversal: chuẩn hóa tên miền (kể cả IDN tiếng Việt) sang Punycode ASCII
+    // và validate DKIM selector hợp lệ (RFC 6376 §3.1).
+    $domain = NukeViet\Http\Http::filter_domain($domain);
+    if (empty($domain)) {
+        return false;
+    }
+    if (!preg_match('/^[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)*$/', $selector)) {
+        return false;
+    }
+
     $publickeyfile = NV_ROOTDIR . '/' . NV_CERTS_DIR . '/' . $selector . '_dkim.' . $domain . '.public.pem';
     $publickey = file_get_contents($publickeyfile);
     $publickey = preg_replace('/^-+.*?-+$/m', '', $publickey);
@@ -3925,11 +4118,12 @@ function mload_url_generate($module, $op, $amp = '&amp;', $checkuser = false, $o
  * Hàm tạo mã CSRF
  *
  * @param string $key
+ * @param string $prefix
  * @return string
  */
-function csrf_create($key)
+function csrf_create($key, $prefix = NV_CHECK_SESSION)
 {
-    return hash_hmac('sha256', NV_CHECK_SESSION . '_' . $key . '_' . NV_CURRENTTIME, NV_CACHE_PREFIX) . NV_CURRENTTIME;
+    return hash_hmac('sha256', $prefix . '_' . $key . '_' . NV_CURRENTTIME, NV_CACHE_PREFIX) . NV_CURRENTTIME;
 }
 
 /**
@@ -3938,17 +4132,18 @@ function csrf_create($key)
  *
  * @param string $csrf
  * @param string $key
+ * @param string $prefix
+ * @param int    $lifetime
  * @return bool
  */
-function csrf_check($csrf, $key)
+function csrf_check($csrf, $key, $prefix = NV_CHECK_SESSION, $lifetime = 3600)
 {
     $timestamp = substr($csrf, -10, 10);
     $timestamp = (int) $timestamp;
-    $lifetime = 3600; // Thời lượng sống của mã CSRF, mặc định 60 phút
-    if ($timestamp < (NV_CURRENTTIME - $lifetime) or $timestamp > NV_CURRENTTIME) {
+    if (($lifetime > 0 && $timestamp < (NV_CURRENTTIME - $lifetime)) || $timestamp > NV_CURRENTTIME) {
         return false;
     }
-    $expected = hash_hmac('sha256', NV_CHECK_SESSION . '_' . $key . '_' . $timestamp, NV_CACHE_PREFIX) . $timestamp;
+    $expected = hash_hmac('sha256', $prefix . '_' . $key . '_' . $timestamp, NV_CACHE_PREFIX) . $timestamp;
 
     return hash_equals($expected, $csrf);
 }
@@ -4060,11 +4255,11 @@ function nv_parse_phone($phone)
 
     $_phones = explode('|', nv_unhtmlspecialchars($phone));
     $phones = [];
-    foreach ($_phones as $phone) {
-        if (preg_match("/^(.*)\s*\[([0-9\+\.\,\;\*\#]+)\]$/", $phone, $m)) {
+    foreach ($_phones as $_phone) {
+        if (preg_match("/^(.*)\s*\[([0-9\+\.\,\;\*\#]+)\]$/", $_phone, $m)) {
             $phones[] = [nv_htmlspecialchars($m[1]), $m[2]];
         } else {
-            $phones[] = [nv_htmlspecialchars(preg_replace("/\[[^\]]*\]/", '', $phone))];
+            $phones[] = [nv_htmlspecialchars(preg_replace("/\[[^\]]*\]/", '', $_phone))];
         }
     }
 
@@ -4113,7 +4308,7 @@ function nv_get_email_template($emailid, $lang = '')
     $attachments = [];
     $email_data['attachments'] = explode(',', $email_data['attachments']);
     foreach ($email_data['attachments'] as $attachment) {
-        if (is_file(NV_UPLOADS_REAL_DIR . '/emailtemplates/' . $attachment)) {
+        if (strpos($attachment, '..') === false and is_file(NV_UPLOADS_REAL_DIR . '/emailtemplates/' . $attachment)) {
             $attachments[] = NV_UPLOADS_REAL_DIR . '/emailtemplates/' . $attachment;
         }
     }
@@ -4237,6 +4432,7 @@ function nv_sendmail_from_template($emailid, $data = [], $lang = '', $attachment
             }
 
             $tpl = new \NukeViet\Template\NVSmarty();
+            $tpl->enableSecurity(new \NukeViet\Template\NVSmartyMailSecurity($tpl));
             foreach ($merge_fields as $field_key => $field_value) {
                 $tpl->assign($field_key, $simple_value ? $field_value : $field_value['data']);
             }
@@ -4342,7 +4538,7 @@ function nv_currency_format(float $num, string $lang = '')
 /**
  * @param string $key
  * @param string $lang
- * @return null|string|number
+ * @return null|string|int
  */
 function nv_region_config(string $key, string $lang = '')
 {
@@ -4519,4 +4715,25 @@ function nv_outdated_browser()
     }
 
     return false;
+}
+
+/**
+ * Lấy đầy đủ giao diện xem trực tuyến một tệp js.
+ * Được dùng để trả về page content cho một iframe xem PDF trực tuyến.
+ *
+ * @param string $file_url
+ * @return string
+ */
+function nv_theme_viewpdf(string $file_url): string
+{
+    global $global_config;
+
+    $pdf_js_dir = NV_STATIC_URL . NV_ASSETS_DIR . '/js/pdf.js/';
+    $pdf_url = $file_url;
+    $nv_lang_interface = NV_LANG_INTERFACE;
+    $nv_html_dir = nv_region_config('dir');
+
+    ob_start();
+    include NV_ROOTDIR . '/' . NV_ASSETS_DIR . '/js/pdf.js/web/viewer.php';
+    return (string) ob_get_clean();
 }

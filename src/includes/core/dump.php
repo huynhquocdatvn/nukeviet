@@ -23,9 +23,9 @@ if (!defined('NV_MAINFILE')) {
  */
 class dumpsave
 {
-    public $savetype;
-    public $filesavename;
-    public $mode;
+    public string $savetype;
+    public string $filesavename;
+    public string $mode;
     public $comp_level = 9;
     public $fp = false;
 
@@ -54,6 +54,10 @@ class dumpsave
      */
     public function open()
     {
+        if (!nv_check_dump_path($this->filesavename, true)) {
+            return false;
+        }
+
         $this->fp = call_user_func_array(($this->savetype == 'gz') ? 'gzopen' : 'fopen', [$this->filesavename, $this->mode]);
 
         return $this->fp;
@@ -84,7 +88,7 @@ class dumpsave
         if ($this->fp) {
             $return = @call_user_func(($this->savetype == 'gz') ? 'gzclose' : 'fclose', $this->fp);
             if ($return) {
-                @chmod($this->filesavename, 0666);
+                @chmod($this->filesavename, 0600);
 
                 return true;
             }
@@ -92,6 +96,70 @@ class dumpsave
 
         return false;
     }
+}
+
+/**
+ * Kiểm tra đường dẫn file dump có hợp lệ hay không
+ *
+ * @param string $file
+ * @param bool $is_new
+ * @return bool
+ */
+function nv_check_dump_path($file, $is_new = false)
+{
+    $arr_file = explode('/', str_replace('\\', '/', $file));
+    $ext = nv_getextension((string) end($arr_file));
+
+    if (!in_array($ext, ['sql', 'gz'], true)) {
+        return false;
+    }
+
+    $path_to_check = $is_new ? dirname($file) : $file;
+    $real_dir = realpath($path_to_check);
+    if ($real_dir === false) {
+        return false;
+    }
+    $real_dir = str_replace('\\', '/', $real_dir);
+
+    $allowed = false;
+
+    // Thư mục backup mặc định
+    $log_dir = realpath(NV_ROOTDIR . '/' . NV_LOGS_DIR . '/dump_backup');
+    if ($log_dir !== false) {
+        $log_dir = str_replace('\\', '/', $log_dir);
+        if (strpos($real_dir, $log_dir) === 0 && in_array($ext, ['sql', 'gz'], true)) {
+            $allowed = true;
+        }
+    }
+
+    // Thư mục cho phép khác
+    if (!$allowed && defined('NV_CONFIG_DIR') && $ext === 'sql') {
+        $config_data_dir = realpath(NV_ROOTDIR . '/' . NV_CONFIG_DIR . '/data');
+        if ($config_data_dir !== false) {
+            $config_data_dir = str_replace('\\', '/', $config_data_dir);
+            $parent_dir = $is_new ? $real_dir : dirname($real_dir);
+            if (preg_match('#^' . preg_quote($config_data_dir, '#') . '/[a-zA-Z0-9_\-]+$#', $parent_dir)) {
+                $allowed = true;
+            }
+        }
+    }
+
+    // Thư mục tạm NV_TEMP_DIR
+    if (!$allowed && defined('NV_TEMP_DIR') && in_array($ext, ['sql', 'gz'], true)) {
+        $temp_dir = realpath(NV_ROOTDIR . '/' . NV_TEMP_DIR);
+        if ($temp_dir !== false) {
+            $temp_dir = str_replace('\\', '/', $temp_dir);
+            if (strpos($real_dir, $temp_dir) === 0) {
+                $allowed = true;
+            }
+        }
+    }
+
+    if (!$allowed) {
+        return false;
+    }
+
+    return true;
 }
 
 /**
@@ -249,8 +317,12 @@ function nv_dump_restore($file)
         set_time_limit(1200);
     }
 
+    if (!nv_check_dump_path($file, false)) {
+        return false;
+    }
+
     //kiem tra file
-    if (!file_exists($file)) {
+    if (!is_readable($file)) {
         return false;
     }
 

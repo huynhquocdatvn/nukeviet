@@ -39,6 +39,10 @@ foreach ($comments as $row) {
         'id' => $row['id']
     ];
 
+    if (!defined('NV_IS_SPADMIN') && !isset($site_mod_comm[$row['module']])) {
+        continue;
+    }
+
     // Xóa đính kèm
     if (!empty($row['attach'])) {
         nv_deletefile(NV_UPLOADS_REAL_DIR . '/' . $module_upload . '/' . $row['attach']);
@@ -48,12 +52,9 @@ foreach ($comments as $row) {
         $db->query('DELETE FROM ' . NV_PREFIXLANG . '_' . $module_data . ' WHERE cid=' . $row['cid']);
         $db->query('UPDATE ' . NV_PREFIXLANG . '_' . $module_data . ' SET pid=' . $row['pid'] . ' WHERE pid=' . $row['cid']);
     } elseif (!empty($site_mod_comm)) {
-        $array_mod_name = [];
-        foreach ($site_mod_comm as $module_i => $row) {
-            $array_mod_name[] = "'" . $module_i . "'";
-        }
-        $db->query('DELETE FROM ' . NV_PREFIXLANG . '_' . $module_data . ' WHERE cid=' . $row['cid'] . ' AND module IN (' . implode(', ', $array_mod_name) . ')');
-        $db->query('UPDATE ' . NV_PREFIXLANG . '_' . $module_data . ' SET pid=' . $row['pid'] . ' WHERE pid=' . $row['cid'] . ' AND module IN (' . implode(', ', $array_mod_name) . ')');
+        $modules_str = "'" . implode("', '", array_keys($site_mod_comm)) . "'";
+        $db->query('DELETE FROM ' . NV_PREFIXLANG . '_' . $module_data . ' WHERE cid=' . $row['cid'] . ' AND module IN (' . $modules_str . ')');
+        $db->query('UPDATE ' . NV_PREFIXLANG . '_' . $module_data . ' SET pid=' . $row['pid'] . ' WHERE pid=' . $row['cid'] . ' AND module IN (' . $modules_str . ')');
     }
 
     nv_delete_notification(NV_LANG_DATA, $module_name, 'comment_queue', $row['cid']);

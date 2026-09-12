@@ -75,6 +75,7 @@ if ($captcha_type == 'recaptcha' and (empty($global_config['recaptcha_sitekey'])
 $csrf_key = 'admin_login';
 $admin_login_success = false;
 /** @disregard P1011 */
+// phpcs:ignore
 $passkey_allowed = !(defined('SSO_SERVER') and (defined('NV_IS_USER_FORUM') or NV_MY_DOMAIN != SSO_REGISTER_DOMAIN));
 
 // Tạo thử thách đăng nhập passkey
@@ -496,11 +497,27 @@ if (!empty($admin_pre_data) and $nv_Request->isset_request('submit2scode', 'post
     $nv_totppin = $nv_Request->get_title('nv_totppin', 'post', '');
     $nv_backupcodepin = $nv_Request->get_title('nv_backupcodepin', 'post', '');
 
+    // Chống brute-force cho bước xác thực 2 bước
+    $tfa_blocker_key = '2fa_uid_' . $admin_pre_data['userid'];
+
+    // Giới hạn brute-force mã xác thực 2 bước
+    if ($global_config['login_number_tracking'] and $blocker->is_blocklogin($tfa_blocker_key)) {
+        nv_jsonOutput([
+            'status' => 'error',
+            'input' => '',
+            'mess' => $nv_Lang->getGlobal('userlogin_blocked', $global_config['login_number_tracking'], nv_datetime_format($blocker->login_block_end, 1))
+        ]);
+    }
+
     $step2_isvalid = false;
     $GoogleAuthenticator = new \NukeViet\Core\GoogleAuthenticator();
 
     if (!empty($nv_totppin)) {
         if (!$GoogleAuthenticator->verifyOpt($admin_pre_data['user_2s_secretkey'], $nv_totppin)) {
+            // Ghi nhận lần thử sai để giới hạn brute-force mã 2 bước
+            if ($global_config['login_number_tracking']) {
+                $blocker->set_loginFailed($tfa_blocker_key, NV_CURRENTTIME);
+            }
             nv_jsonOutput([
                 'status' => 'error',
                 'input' => 'nv_totppin',
@@ -510,13 +527,20 @@ if (!empty($admin_pre_data) and $nv_Request->isset_request('submit2scode', 'post
 
         $step2_isvalid = true;
     } elseif (!empty($nv_backupcodepin)) {
-        $nv_backupcodepin = nv_strtolower($nv_backupcodepin);
-        $sth = $db->prepare('SELECT code FROM ' . NV_USERS_GLOBALTABLE . '_backupcodes WHERE is_used = 0 AND code = :code AND userid = :userid');
-        $sth->bindValue(':code', $nv_backupcodepin, PDO::PARAM_STR);
-        $sth->bindValue(':userid', $admin_pre_data['userid'], PDO::PARAM_INT);
-        $sth->execute();
+        $nv_backupcodepin = $crypt->encryptDeterministic(nv_strtolower($nv_backupcodepin));
 
-        if ($sth->rowCount() != 1) {
+        // Cập nhật ngay lượt sử dụng tránh brute-force mã dự phòng
+        $stmt = $db->prepare('UPDATE ' . NV_USERS_GLOBALTABLE . '_backupcodes SET is_used = 1, time_used = :time_used WHERE code = :code AND userid = :userid AND is_used = 0');
+        $stmt->bindValue(':time_used', NV_CURRENTTIME, PDO::PARAM_INT);
+        $stmt->bindValue(':code', $nv_backupcodepin, PDO::PARAM_STR);
+        $stmt->bindValue(':userid', $admin_pre_data['userid'], PDO::PARAM_INT);
+        $stmt->execute();
+
+        if ($stmt->rowCount() != 1) {
+            // Ghi nhận lần thử sai để giới hạn brute-force mã dự phòng
+            if ($global_config['login_number_tracking']) {
+                $blocker->set_loginFailed($tfa_blocker_key, NV_CURRENTTIME);
+            }
             nv_jsonOutput([
                 'status' => 'error',
                 'input' => 'nv_backupcodepin',
@@ -524,17 +548,11 @@ if (!empty($admin_pre_data) and $nv_Request->isset_request('submit2scode', 'post
             ]);
         }
 
-        $code = $sth->fetchColumn();
-
-        $stmt = $db->prepare("UPDATE " . NV_USERS_GLOBALTABLE . "_backupcodes SET is_used=1, time_used=:time_used WHERE code=:code AND userid=:userid");
-        $stmt->bindValue(':time_used', NV_CURRENTTIME, PDO::PARAM_INT);
-        $stmt->bindValue(':code', $code, PDO::PARAM_STR);
-        $stmt->bindValue(':userid', $admin_pre_data['userid'], PDO::PARAM_INT);
-        $stmt->execute();
         $step2_isvalid = true;
     }
 
     if ($step2_isvalid) {
+        $blocker->reset_trackLogin($tfa_blocker_key);
         $row = $admin_pre_data;
         $admin_login_success = true;
     }
@@ -738,7 +756,7 @@ if (empty($admin_pre_data) and $nv_Request->isset_request('nv_login,nv_password'
     $row = check_admin_login($nv_username);
     if (empty($row) or !$crypt->validate_password($nv_password, $row['password'])) {
         // Đăng nhập bước đầu thất bại
-        nv_insert_logs(NV_LANG_DATA, 'login', '[' . $nv_username . '] ' . $nv_Lang->getGlobal('loginsubmit') . ' ' . $nv_Lang->getGlobal('fail'), ' Client IP:' . NV_CLIENT_IP, 0);
+        nv_insert_logs(NV_LANG_DATA, 'login', '[' . $nv_username . '] ' . $nv_Lang->getGlobal('loginsubmit') . ' ' . $nv_Lang->getGlobal('fail'), '', 0);
         $blocker->set_loginFailed($nv_username, NV_CURRENTTIME);
 
         nv_jsonOutput([
@@ -796,7 +814,7 @@ if (empty($admin_pre_data) and $nv_Request->isset_request('nv_login,nv_password'
 
     if ($_2step_require or $row['active2step']) {
         // Ghi nhận thông tin bước 1, lưu lại và chuyển đến bước 2
-        nv_insert_logs(NV_LANG_DATA, 'Pre login', '[' . $nv_username . '] ' . $nv_Lang->getGlobal('loginsubmit'), ' Client IP:' . NV_CLIENT_IP, 0);
+        nv_insert_logs(NV_LANG_DATA, 'Pre login', '[' . $nv_username . '] ' . $nv_Lang->getGlobal('loginsubmit'), '', 0);
         $admin_id = (int) ($row['admin_id']);
         $checknum = md5(nv_genpass(10));
         $array_admin = [
@@ -840,7 +858,7 @@ if (empty($admin_pre_data) and $nv_Request->isset_request('nv_login,nv_password'
 
 // Đăng nhập admin hoàn toàn thành công
 if ($admin_login_success === true) {
-    nv_insert_logs(NV_LANG_DATA, 'login', '[' . $row['username'] . '] ' . $nv_Lang->getGlobal('loginsubmit'), ' Client IP:' . NV_CLIENT_IP, 0);
+    nv_insert_logs(NV_LANG_DATA, 'login', '[' . $row['username'] . '] ' . $nv_Lang->getGlobal('loginsubmit'), '', 0);
     $admin_id = (int) ($row['admin_id']);
     $checknum = md5(nv_genpass(10));
     $array_admin = [

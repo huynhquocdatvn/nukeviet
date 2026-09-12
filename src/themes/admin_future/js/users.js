@@ -23,14 +23,16 @@ window.nv_show_list_field = () => {
 };
 
 // Load SQL choice data
-window.nv_load_sqlchoice = function(choice_name_select, choice_seltected) {
+window.nv_load_sqlchoice = function(choice_name_select, choice_seltected, callback) {
     let getval = "";
     if (choice_name_select == "table") {
+        // Load danh sách các bảng khi chọn module
         let choicesql_module = $("select[name=choicesql_module]").val();
         let module_selected = (choicesql_module == "" || choicesql_module == undefined) ? '' : choicesql_module;
         getval = "&module=" + module_selected;
         $("#choicesql_column").html("");
     } else if (choice_name_select == "column") {
+        // Load danh sách các cột khi chọn bảng
         let choicesql_module = $("select[name=choicesql_module]").val();
         let module_selected = (choicesql_module == "" || choicesql_module == undefined) ? '' : choicesql_module;
         let choicesql_table = $("select[name=choicesql_table]").val();
@@ -41,12 +43,19 @@ window.nv_load_sqlchoice = function(choice_name_select, choice_seltected) {
         $('#choicesql_' + choice_name_select).html(res);
 
         // Gắn sự kiện change cho select mới tạo
-        $('#choicesql_' + choice_name_select + ' select').on('change', function() {
+        const selectElement = $('#choicesql_' + choice_name_select + ' select');
+        selectElement.on('change', function() {
             let next = $(this).data('next');
             if (next) {
                 window.nv_load_sqlchoice(next, '');
             }
         });
+
+        if (typeof callback === 'function') {
+            callback();
+        } else {
+            selectElement.trigger('change');
+        }
     });
 };
 
@@ -176,9 +185,11 @@ $(function () {
             let orderVal = sqlDataChoice.data('column-order');
             let sortVal = sqlDataChoice.data('column-sort');
 
-            window.nv_load_sqlchoice('module', moduleVal);
-            window.nv_load_sqlchoice('table', tableVal);
-            window.nv_load_sqlchoice('column', keyVal + '|' + valVal + '|' + orderVal + '|' + sortVal);
+            window.nv_load_sqlchoice('module', moduleVal, () => {
+                window.nv_load_sqlchoice('table', tableVal, () => {
+                    window.nv_load_sqlchoice('column', keyVal + '|' + valVal + '|' + orderVal + '|' + sortVal);
+                });
+            });
         }
 
         // Initialize field choice items count
@@ -189,7 +200,7 @@ $(function () {
 
         // Datepicker initialization
         if ($('.datepicker').length > 0) {
-            $('.datepicker').datepicker({
+            $('.datepicker').attr('autocomplete', 'off').datepicker({
                 dateFormat: nv_jsdate_post.replace('yyyy', 'yy'),
                 changeMonth: true,
                 changeYear: true,
@@ -228,6 +239,7 @@ $(function () {
                 } else {
                     $('#choiceitems').removeClass('d-none');
                 }
+                $('select[name="choicetypes"]').trigger('change');
             }
         });
 
@@ -237,6 +249,11 @@ $(function () {
             $('#choiceitems, #choicesql').addClass('d-none');
             if (choicetype == 'field_choicetypes_sql') {
                 $('#choicesql').removeClass('d-none');
+
+                // Load danh sách module cho SQL choice nếu chưa có
+                if ($('#choicesql_module select').length == 0) {
+                    window.nv_load_sqlchoice('module', '');
+                }
             } else {
                 $('#choiceitems').removeClass('d-none');
             }
@@ -649,7 +666,7 @@ $(function () {
 
         // Pick ngày tháng ô ngày hết hạn nhóm
         if ($('[name="exp_time"]').length) {
-            $('[name="exp_time"]').datepicker({
+            $('[name="exp_time"]').attr('autocomplete', 'off').datepicker({
                 showOn: "both",
                 dateFormat: nv_jsdate_post.replace('yyyy', 'yy'),
                 changeMonth: true,
@@ -1153,12 +1170,12 @@ $(function () {
         // Chọn câu hỏi bảo mật từ dropdown
         $(document).on('click', 'a.question', function (e) {
             e.preventDefault();
-            $('[name="question"]').val($(this).text());
+            $('[name="question"]').val($(this).text()).trigger('change');
         });
 
         // Khởi tạo datepicker cho các trường ngày tháng
         if ($('.datepicker').length > 0) {
-            $('.datepicker').datepicker({
+            $('.datepicker').attr('autocomplete', 'off').datepicker({
                 showOn: 'focus',
                 dateFormat: nv_jsdate_post.replace('yyyy', 'yy'),
                 changeMonth: true,
@@ -1200,9 +1217,9 @@ $(function () {
                     if (res.status === 'error') {
                         return nukeviet.toast(res.mess, 'error');
                     }
-                    field1.val(res.value);
+                    field1.val(res.value).trigger('change');
                     if (field2.length) {
-                        field2.val(res.value);
+                        field2.val(res.value).trigger('change');
                     }
                 },
                 error: function (xhr, text, err) {
@@ -1489,12 +1506,12 @@ $(function () {
         // Chọn câu hỏi bảo mật từ dropdown
         $(document).on('click', 'a.question', function (e) {
             e.preventDefault();
-            $('[name="question"]').val($(this).text());
+            $('[name="question"]').val($(this).text()).trigger('change');
         });
 
         // Khởi tạo datepicker cho các trường ngày tháng
         if ($('.datepicker').length > 0) {
-            $('.datepicker').datepicker({
+            $('.datepicker').attr('autocomplete', 'off').datepicker({
                 showOn: 'focus',
                 dateFormat: nv_jsdate_post.replace('yyyy', 'yy'),
                 changeMonth: true,
@@ -1536,9 +1553,9 @@ $(function () {
                     if (res.status === 'error') {
                         return nukeviet.toast(res.mess, 'error');
                     }
-                    field1.val(res.value);
+                    field1.val(res.value).trigger('change');
                     if (field2.length) {
-                        field2.val(res.value);
+                        field2.val(res.value).trigger('change');
                     }
                 },
                 error: function (xhr, text, err) {
@@ -1832,7 +1849,7 @@ $(function () {
 
         // Khởi tạo datepicker cho ô lọc ngày đăng ký
         if ($('.datepicker-search').length > 0) {
-            $('.datepicker-search').datepicker({
+            $('.datepicker-search').attr('autocomplete', 'off').datepicker({
                 showOn: 'focus',
                 dateFormat: nv_jsdate_post.replace('yyyy', 'yy'),
                 changeMonth: true,
@@ -2312,7 +2329,7 @@ $(function () {
 
         // Khởi tạo datepicker cho các trường ngày tháng
         if ($('.datepicker').length > 0) {
-            $('.datepicker').datepicker({
+            $('.datepicker').attr('autocomplete', 'off').datepicker({
                 showOn: 'focus',
                 dateFormat: nv_jsdate_post.replace('yyyy', 'yy'),
                 changeMonth: true,
@@ -2447,7 +2464,7 @@ $(function () {
     if (nv_func_name === 'getuserid') {
         // Khởi tạo datepicker cho các ô ngày tháng
         if ($('.datepicker-get').length > 0) {
-            $('.datepicker-get').datepicker({
+            $('.datepicker-get').attr('autocomplete', 'off').datepicker({
                 dateFormat: nv_jsdate_get.replace('yyyy', 'yy'),
                 changeMonth: true,
                 changeYear: true,

@@ -156,7 +156,7 @@
                         <div class="card-body">
                             <div class="mb-3">
                                 <label for="newcontent_topicid" class="form-label">{$LANG->getModule('admin_topic_sl')}:</label>
-                                <select class="form-select" id="newcontent_topicid" name="topicid">
+                                <select class="form-select" id="newcontent_topicid" name="topicid" data-checkss="{$CHECKSS}">
                                     {foreach from=$DATA_TOPICS key=key item=value}
                                     <option value="{$key}"{if $key eq $DATA.topicid} selected{/if}>{$value}</option>
                                     {/foreach}
@@ -305,7 +305,7 @@
                     </div>
                 </div>
                 <div class="card-body">
-                    <select id="newcontent_keywords" class="form-control" aria-label="{$LANG->getModule('content_keyword')}" name="keywords[]" multiple data-placeholder="{$LANG->getModule('input_keyword')}">
+                    <select id="newcontent_keywords" data-checkss="{$AJ_KEYWORDS_CHECKSS}" class="form-control" aria-label="{$LANG->getModule('content_keyword')}" name="keywords[]" multiple data-placeholder="{$LANG->getModule('input_keyword')}">
                         {foreach from=$DATA.keywords item=value}
                         <option value="{$value}" selected>{$value}</option>
                         {/foreach}
@@ -316,11 +316,11 @@
                 <div class="card-header py-2">
                     <div class="d-flex gap-2 justify-content-between align-items-center">
                         <div class="fw-medium fs-5 text-truncate">{$LANG->getModule('content_tag')}</div>
-                        <button type="button" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" data-bs-trigger="hover" data-bs-title="{$LANG->getModule('tags_auto_create')}" aria-label="{$LANG->getModule('tags_auto_create')}" data-toggle="tags_auto_create" data-checkss="{$CHECKSS}"><i class="fa-solid fa-tags" data-icon="fa-tags"></i></button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-toggle="tooltip" data-bs-trigger="hover" data-bs-title="{$LANG->getModule('tags_auto_create')}" aria-label="{$LANG->getModule('tags_auto_create')}" data-toggle="tags_auto_create" data-checkss="{$AJ_TAGS_CHECKSS}"><i class="fa-solid fa-tags" data-icon="fa-tags"></i></button>
                     </div>
                 </div>
                 <div class="card-body">
-                    <select id="newcontent_tags" class="form-control" aria-label="{$LANG->getModule('content_tag')}" name="tags[]" multiple data-placeholder="{$LANG->getModule('input_tag')}">
+                    <select id="newcontent_tags" data-checkss="{$AJ_TAGSAJ_CHECKSS}" class="form-control" aria-label="{$LANG->getModule('content_tag')}" name="tags[]" multiple data-placeholder="{$LANG->getModule('input_tag')}">
                         {foreach from=$DATA.tags item=value}
                         <option value="{$value}" selected>{$value}</option>
                         {/foreach}
@@ -352,7 +352,7 @@
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <select id="newcontent_related_ids" data-id="{$DATA.id}" class="form-control" aria-label="{$LANG->getModule('related_articles')}" name="related_ids[]" multiple data-placeholder="{$LANG->getModule('related_articles_ph')}">
+                        <select id="newcontent_related_ids" data-id="{$DATA.id}" data-checkss="{$CHECKSS}" class="form-control" aria-label="{$LANG->getModule('related_articles')}" name="related_ids[]" multiple data-placeholder="{$LANG->getModule('related_articles_ph')}">
                             {foreach from=$RELATED_NEWS item=news}
                             <option value="{$news.id}" selected>{$news.title}</option>
                             {/foreach}
@@ -425,33 +425,6 @@
                     </div>
                 </div>
             </div>
-            {if not empty($MCONFIG.instant_articles_active)}
-            <div class="card mb-3">
-                <div class="card-header fw-medium fs-5">
-                    {$LANG->getModule('content_insart')}
-                </div>
-                <div class="card-body">
-                    <div class="mb-2">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" value="1" id="instant_active" name="instant_active"{if not empty($DATA.instant_active)} checked{/if}>
-                            <label class="form-check-label" for="instant_active">
-                                {$LANG->getModule('content_instant_active')}
-                            </label>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label for="instant_template" class="form-label">{$LANG->getModule('content_instant_template')}:</label>
-                        <input type="text" class="form-control" id="instant_template" name="instant_template" value="{$DATA.instant_template}" maxlength="255" placeholder="{$LANG->getModule('content_instant_templatenote')}">
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" value="1" id="instant_creatauto" name="instant_creatauto"{if not empty($DATA.instant_creatauto)} checked{/if}>
-                        <label class="form-check-label" for="instant_creatauto">
-                            {$LANG->getModule('content_instant_creatauto')}
-                        </label>
-                    </div>
-                </div>
-            </div>
-            {/if}
         </div>
     </div>
     <div class="accordion mb-3" id="newcontent-advanced-options">

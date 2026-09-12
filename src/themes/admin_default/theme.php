@@ -113,6 +113,7 @@ function nv_admin_theme($contents, $head_site = 1)
     $xtpl->assign('LANG', \NukeViet\Core\Language::$lang_global);
     $xtpl->assign('SITE_FAVICON', $site_favicon);
     $xtpl->assign('ADMIN', $admin_info);
+    $xtpl->assign('UPLOAD_CHECKSS', csrf_create($admin_info['admin_id'] . '_upload'));
 
     if (!empty($global_config['passshow_button'])) {
         $xtpl->parse('main.passshow_button');
@@ -133,7 +134,6 @@ function nv_admin_theme($contents, $head_site = 1)
     $xtpl->assign('NV_COOKIE_PREFIX', $global_config['cookie_prefix']);
 
     if ($global_config['admin_XSSsanitize']) {
-        $xtpl->assign('PURIFY_VERSION', $browser->isBrowser(Browser::BROWSER_IE) ? '2' : '3');
         $xtpl->parse('main.XSSsanitize');
     }
 

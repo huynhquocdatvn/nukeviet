@@ -275,24 +275,33 @@ function nv_getCountry_from_file($ip)
                 }
             }
         }
-    } else {
+    } elseif (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
         $numbers = explode(':', $ip);
-        if (file_exists(NV_ROOTDIR . '/' . NV_IP_DIR . '6/' . $numbers[0] . '.php')) {
-            $ip = inet_pton($ip);
-            $binaryip = inet_to_bits($ip);
+        if (preg_match('/^[a-f0-9]*$/i', $numbers[0]) && file_exists(NV_ROOTDIR . '/' . NV_IP_DIR . '6/' . $numbers[0] . '.php')) {
+            $ip_pton = inet_pton($ip);
 
-            $ranges = [];
-            include NV_ROOTDIR . '/' . NV_IP_DIR . '6/' . $numbers[0] . '.php';
-            foreach ($ranges as $cidrnet => $country) {
-                [$net, $maskbits] = explode('/', $cidrnet);
-                $net = inet_pton($net);
-                $binarynet = inet_to_bits($net);
+            // Đảm bảo inet_pton không trả về false (tránh Fatal Error PHP 8)
+            if ($ip_pton !== false) {
+                $binaryip = inet_to_bits($ip_pton);
 
-                $ip_net_bits = substr($binaryip, 0, $maskbits);
-                $net_bits = substr($binarynet, 0, $maskbits);
+                $ranges = [];
+                include NV_ROOTDIR . '/' . NV_IP_DIR . '6/' . $numbers[0] . '.php';
 
-                if ($ip_net_bits === $net_bits) {
-                    return $country;
+                foreach ($ranges as $cidrnet => $country) {
+                    [$net, $maskbits] = explode('/', $cidrnet);
+                    $net_pton = inet_pton($net);
+
+                    // Kiểm tra kết quả IP Net để tránh lỗi tương tự khi lấy từ DB
+                    if ($net_pton !== false) {
+                        $binarynet = inet_to_bits($net_pton);
+
+                        $ip_net_bits = substr($binaryip, 0, (int)$maskbits);
+                        $net_bits = substr($binarynet, 0, (int)$maskbits);
+
+                        if ($ip_net_bits === $net_bits) {
+                            return $country;
+                        }
+                    }
                 }
             }
         }
@@ -337,21 +346,17 @@ function nv_getCountry_from_cookie($ip)
     }
 
     $cookie_path = '/';
-    if (version_compare(PHP_VERSION, '7.3.0', '>=')) {
-        $options = [
-            'expires' => $livecookietime,
-            'path' => $cookie_path,
-            'domain' => $cookie_domain,
-            'secure' => (bool) $global_config['cookie_secure'],
-            'httponly' => (bool) $global_config['cookie_httponly']
-        ];
-        if (!empty($global_config['cookie_SameSite']) and ('Lax' == $global_config['cookie_SameSite'] or 'Strict' == $global_config['cookie_SameSite'] or ('None' == $global_config['cookie_SameSite'] and $global_config['cookie_secure']))) {
-            $options['samesite'] = $global_config['cookie_SameSite'];
-        }
-        setcookie($global_config['cookie_prefix'] . '_ctr', $codecountry, $options);
-    } else {
-        setcookie($global_config['cookie_prefix'] . '_ctr', $codecountry, $livecookietime, $cookie_path, $cookie_domain, (bool) $global_config['cookie_secure'], (bool) $global_config['cookie_httponly']);
+    $options = [
+        'expires' => $livecookietime,
+        'path' => $cookie_path,
+        'domain' => $cookie_domain,
+        'secure' => (bool) $global_config['cookie_secure'],
+        'httponly' => (bool) $global_config['cookie_httponly']
+    ];
+    if (!empty($global_config['cookie_SameSite']) and ('Lax' == $global_config['cookie_SameSite'] or 'Strict' == $global_config['cookie_SameSite'] or ('None' == $global_config['cookie_SameSite'] and $global_config['cookie_secure']))) {
+        $options['samesite'] = $global_config['cookie_SameSite'];
     }
+    setcookie($global_config['cookie_prefix'] . '_ctr', $codecountry, $options);
 
     return $country;
 }

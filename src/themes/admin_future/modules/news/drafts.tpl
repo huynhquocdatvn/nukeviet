@@ -66,7 +66,7 @@
                                 {if $row.allowed_edit and $row.my_draft}
                                 <a href="{$smarty.const.NV_BASE_ADMINURL}index.php?{$smarty.const.NV_LANG_VARIABLE}={$smarty.const.NV_LANG_DATA}&amp;{$smarty.const.NV_NAME_VARIABLE}={$MODULE_NAME}&amp;{$smarty.const.NV_OP_VARIABLE}=content{if not empty($row.new_id)}&amp;id={$row.new_id}{/if}&amp;draft_id={$row.id}" class="btn btn-sm btn-secondary text-nowrap"><i class="fa-solid fa-pencil"></i> {$LANG->getModule('draft_continue')}</a>
                                 {/if}
-                                <button type="button" class="btn btn-sm btn-danger" data-toggle="draft_cancel" data-id="{$row.id}"><i class="fa-solid fa-circle-xmark" data-icon="fa-circle-xmark"></i> {$LANG->getGlobal('cancel')}</button>
+                                <button type="button" class="btn btn-sm btn-danger" data-toggle="draft_cancel" data-checkss="{$DRAFTS_CHECKSS}" data-id="{$row.id}"><i class="fa-solid fa-circle-xmark" data-icon="fa-circle-xmark"></i> {$LANG->getGlobal('cancel')}</button>
                             </div>
                         </td>
                     </tr>
@@ -85,7 +85,7 @@
                     <select id="element_action" class="form-select fw-150" aria-label="{$LANG->getGlobal('select_actions')}" aria-describedby="element_action_btn">
                         <option value="cancel">{$LANG->getGlobal('cancel')}</option>
                     </select>
-                    <button class="btn btn-primary" type="button" id="element_action_btn" data-toggle="actionDrafts">{$LANG->getModule('action')}</button>
+                    <button class="btn btn-primary" type="button" id="element_action_btn" data-toggle="actionDrafts" data-checkss="{$DRAFTS_CHECKSS}">{$LANG->getModule('action')}</button>
                 </div>
             </div>
             <div class="pagination-wrap">

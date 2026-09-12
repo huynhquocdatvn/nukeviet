@@ -210,6 +210,9 @@ define('NV_JSON_ENCODE', JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 // JSON encode nhúng trong <script> tag HTML
 define('NV_JSON_ENCODE_SCRIPT', JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
+// JSON encode cho JSON-LD (schema.org) nhúng trong <script type="application/ld+json">
+define('NV_JSON_ENCODE_LDJSON', NV_JSON_ENCODE_SCRIPT | JSON_PRETTY_PRINT);
+
 //Browser Names
 define('BROWSER_OPERA', 'Opera');
 define('BROWSER_OPERAMINI', 'Opera Mini');
@@ -320,6 +323,7 @@ define('STATISTIC_COOKIE_NAME', 'st'); // Tên cookie chứa thông tin thời g
 
 $global_config['site_charset'] = 'utf-8';
 $global_config['check_module'] = '/^[a-zA-Z0-9\-]+$/';
+$global_config['check_module_data'] = '/^[a-z0-9_]+$/';
 $global_config['check_op'] = '/^[a-zA-Z0-9\-]+$/';
 $global_config['check_op_file'] = '/^([a-zA-Z0-9\-\_]+)\.php$/';
 $global_config['check_block_module'] = '/^(global|module)\.([a-zA-Z0-9\-\_]+)\.php$/';

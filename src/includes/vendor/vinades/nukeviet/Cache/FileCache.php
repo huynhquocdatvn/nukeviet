@@ -48,7 +48,12 @@ class FileCache extends Cache
     public function __construct(string $cacheDir, string $lang, string $cachePrefix, string $keySuffix)
     {
         parent::__construct($lang, $cachePrefix, $keySuffix);
-        $this->cacheDir = $cacheDir;
+
+        $realDir = realpath($cacheDir);
+        if ($realDir === false || !is_dir($realDir)) {
+            throw new Exception('Invalid cache directory: ' . $cacheDir);
+        }
+        $this->cacheDir = $realDir;
 
         if (defined('NV_CURRENTTIME')) {
             $this->currentTime = NV_CURRENTTIME;
@@ -64,6 +69,10 @@ class FileCache extends Cache
      */
     private function delete(string $moduleName, string $pattern): void
     {
+        if (!preg_match('/^([a-zA-Z0-9\_\-]+)$/', $moduleName)) {
+            return;
+        }
+
         $dir = $this->cacheDir . '/' . $moduleName;
 
         if (is_dir($dir) and $dh = opendir($dir)) {
@@ -90,9 +99,7 @@ class FileCache extends Cache
             }
 
             while (($modname = readdir($dh)) !== false) {
-                if (preg_match('/^([a-zA-Z0-9\_\-]+)$/', $modname)) {
-                    $this->delete($modname, $pattern);
-                }
+                $this->delete($modname, $pattern);
             }
             closedir($dh);
         }
@@ -123,7 +130,7 @@ class FileCache extends Cache
      */
     public function getItem(string $moduleName, string $fileName, string $lang = '', int $ttl = 0): false|string
     {
-        if (!preg_match('/^([a-zA-Z0-9\_\-]+)\.cache/', $fileName)) {
+        if (!preg_match('/^([a-zA-Z0-9\_\-]+)\.cache$/', $fileName)) {
             return false;
         }
 
@@ -156,7 +163,7 @@ class FileCache extends Cache
      */
     public function setItem(string $moduleName, string $fileName, string $content, string $lang = '', int $ttl = 0): bool|int
     {
-        if (!preg_match('/^([a-zA-Z0-9\_\-]+)\.cache/', $fileName)) {
+        if (!preg_match('/^([a-zA-Z0-9\_\-]+)\.cache$/', $fileName)) {
             return false;
         }
 
@@ -203,7 +210,9 @@ class FileCache extends Cache
 
         if (($cache = $this->getItem($moduleName, $cache_file, $lang, $ttl)) !== false) {
             $data = unserialize($cache, NV_UNSERIALIZE_SAFE);
-            return is_array($data) ? $data : [];
+            if (is_array($data)) {
+                return $data;
+            }
         }
 
         $list = parent::getList($sql, $key, $bind);

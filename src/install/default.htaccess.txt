@@ -16,7 +16,7 @@ FileETag None
 
   RewriteEngine On
   RewriteBase /
-  RewriteCond %{REQUEST_FILENAME} /(\.(.*)|composer\.json|default\.(htaccess\.txt|web\.config\.txt|php)|mainfile\.php|web\.config|config\.php)$ [NC]
+  RewriteCond %{REQUEST_FILENAME} /(\.(.*)|composer\.json|composer\.lock|default\.(htaccess\.txt|web\.config\.txt|php)|mainfile\.php|web\.config|config\.php)$ [NC]
   RewriteRule ^.* - [L,R=404]
   RewriteCond %{REQUEST_URI} ^/(data/ip6?|includes|install/tpl|vendor|assets/tpl|data/cache|data/certs|data/logs)/.* [NC]
   RewriteRule ^.* - [L,R=404]
@@ -41,6 +41,7 @@ ErrorDocument 504 /error.php?code=504
   AddType application/manifest+json .webmanifest
   AddType application/rss+xml .rss
   AddType application/xml .xml
+  AddType application/wasm .wasm
   AddType font/eot .eot
   AddType font/otf .otf
   AddType font/ttf .ttf

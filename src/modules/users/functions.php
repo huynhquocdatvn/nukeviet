@@ -34,7 +34,7 @@ function get_checknum($userid)
     global $db, $global_config;
 
     if (!empty($global_config['allowuserloginmulti'])) {
-        $checknum = $db->query('SELECT checknum FROM ' . NV_MOD_TABLE . ' WHERE userid = ' . $userid)->fetchColumn();
+        $checknum = $db->query('SELECT checknum FROM ' . NV_MOD_TABLE . ' WHERE userid = ' . (int) $userid)->fetchColumn();
         if (!empty($checknum)) {
             return $checknum;
         }
@@ -57,6 +57,7 @@ function validUserLog($array_user, $remember, $mode_data = [], $current_mode = 0
     global $db, $global_config, $nv_Lang, $global_users_config, $module_name, $module_file, $client_info;
 
     $remember = (int) $remember;
+    $array_user['userid'] = (int) $array_user['userid'];
     $checknum = get_checknum($array_user['userid']);
     $opid = $passkey = $mode_extra = '';
     if (!empty($mode_data)) {
@@ -150,7 +151,7 @@ function validUserLog($array_user, $remember, $mode_data = [], $current_mode = 0
         } else {
             $log_message = $nv_Lang->getModule('st_login');
         }
-        nv_insert_logs(NV_LANG_DATA, $module_name, '[' . $array_user['username'] . '] ' . $log_message, ' Client IP:' . NV_CLIENT_IP, 0);
+        nv_insert_logs(NV_LANG_DATA, $module_name, '[' . $array_user['username'] . '] ' . $log_message, '', 0);
     }
 }
 
@@ -174,7 +175,7 @@ function updateUserCookie($newValues)
             }
         }
         if ($isUpdate) {
-            $remember = (int) $db->query('SELECT remember FROM ' . NV_MOD_TABLE . ' WHERE userid=' . $user_info['userid'] . ' AND active=1')->fetchColumn();
+            $remember = (int) $db->query('SELECT remember FROM ' . NV_MOD_TABLE . ' WHERE userid=' . (int) $user_info['userid'] . ' AND active=1')->fetchColumn();
             NukeViet\Core\User::set_userlogin_hash($user_cookie, $remember);
         }
     }
@@ -338,8 +339,9 @@ function nv_check_username_reg($login)
  */
 function nv_del_user($userid)
 {
-    global $db, $global_config, $module_name, $user_info, $nv_Lang;
+    global $db, $global_config, $module_name, $user_info, $module_upload;
 
+    $userid = (int) $userid;
     $sql = 'SELECT group_id, username, first_name, last_name, gender, email, photo, in_groups, idsite, language
     FROM ' . NV_MOD_TABLE . ' WHERE userid=' . $userid;
     $row = $db->query($sql)->fetch(3);
@@ -375,7 +377,7 @@ function nv_del_user($userid)
 
     nv_insert_logs(NV_LANG_DATA, $module_name, 'log_del_user', 'userid ' . $userid, $user_info['userid']);
 
-    if (!empty($photo) and is_file(NV_ROOTDIR . '/' . $photo)) {
+    if (!empty($photo) and nv_is_file(NV_ROOTDIR . '/' . $photo, SYSTEM_UPLOADS_DIR . '/' . $module_upload)) {
         @nv_deletefile(NV_ROOTDIR . '/' . $photo);
     }
 
@@ -555,16 +557,20 @@ if ($nv_Request->isset_request('field_fileupload,field,_csrf', 'post')) {
             'mess' => 'Stop!!!'
         ]);
     }
-    $checkss = md5(NV_CHECK_SESSION . '_' . $module_name . $field);
     $csrf = $nv_Request->get_title('_csrf', 'post', '');
-    if (!hash_equals($checkss, $csrf)) {
+    if (!csrf_check($csrf, $module_name . '_field_' . $field)) {
         nv_jsonOutput([
             'status' => 'error',
             'mess' => 'Stop!!!'
         ]);
     }
 
-    $result = $db->query('SELECT * FROM ' . NV_MOD_TABLE . '_field WHERE user_editable = 1 AND field=' . $db->quote($field));
+    $where = 'field = ' . $db->quote($field);
+    if (!defined('NV_IS_MODADMIN')) {
+        // Ngoài site: chỉ trường thành viên tự sửa được hoặc trường hiện lúc đăng ký
+        $where .= ' AND for_admin = 0 AND (user_editable = 1 OR show_register = 1)';
+    }
+    $result = $db->query('SELECT * FROM ' . NV_MOD_TABLE . '_field WHERE ' . $where);
     $row_field = $result->fetch();
     if (empty($row_field) or $row_field['field_type'] != 'file') {
         nv_jsonOutput([
@@ -582,7 +588,15 @@ if ($nv_Request->isset_request('field_fileupload,field,_csrf', 'post')) {
 
     $limited_values = !empty($row_field['limited_values']) ? json_decode($row_field['limited_values'], true) : [];
     $file_allowed_ext = !empty($limited_values['filetype']) ? $limited_values['filetype'] : $global_config['file_allowed_ext'];
-    $file_max_size = !empty($limited_values['file_max_size']) ? min($limited_values['file_max_size'], NV_UPLOAD_MAX_FILESIZE) : NV_UPLOAD_MAX_FILESIZE;
+    // Dung lượng tối đa phải > 0, bằng 0 là cấu hình sai nên chặn luôn
+    $file_max_size = (int) ($limited_values['file_max_size'] ?? 0);
+    if ($file_max_size < 1) {
+        nv_jsonOutput([
+            'status' => 'error',
+            'mess' => $nv_Lang->getModule('field_file_max_size_error')
+        ]);
+    }
+    $file_max_size = min($file_max_size, NV_UPLOAD_MAX_FILESIZE);
     $upload = new NukeViet\Files\Upload($file_allowed_ext, $global_config['forbid_extensions'], $global_config['forbid_mimes'], $file_max_size);
     $upload->setLanguage(\NukeViet\Core\Language::$lang_global);
     $upload_info = $upload->save_file($_FILES['file'], NV_ROOTDIR . '/' . NV_TEMP_DIR, false);
@@ -603,7 +617,7 @@ if ($nv_Request->isset_request('field_fileupload,field,_csrf', 'post')) {
         ]);
     }
 
-    if (!in_array($upload_info['ext'], $limited_values['mime'], true)) {
+    if (!empty($limited_values['mime']) and !in_array($upload_info['ext'], $limited_values['mime'], true)) {
         @unlink($upload_info['name']);
         nv_jsonOutput([
             'status' => 'error',

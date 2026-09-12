@@ -118,7 +118,7 @@ function nv_del_content_module($id)
     global $db, $module_name, $module_data, $title, $nv_Lang, $module_config;
     $content_del = 'NO_' . $id;
     $title = '';
-    
+
     $stmt = $db->prepare('SELECT id, listcatid, title FROM ' . NV_PREFIXLANG . '_' . $module_data . '_rows WHERE id= :id');
     $stmt->bindValue(':id', $id, PDO::PARAM_INT);
     $stmt->execute();
@@ -210,7 +210,7 @@ function nv_fix_weight_content($weight_min)
         $stmt->bindValue(':weight_min', $weight_min, PDO::PARAM_INT);
         $stmt->execute();
         $weight = $weight_min;
-        
+
         $stmt_update_row = $db->prepare('UPDATE ' . NV_PREFIXLANG . '_' . $module_data . '_rows SET weight= :weight WHERE id= :id');
         while ($_row = $stmt->fetch()) {
             $stmt_update_row->bindValue(':weight', $weight, PDO::PARAM_INT);
@@ -242,6 +242,7 @@ function nv_fix_weight_content($weight_min)
 function nv_archive_content_module($id, $listcatid)
 {
     global $db, $module_data;
+    $id = (int) $id;
     $array_catid = explode(',', $listcatid);
     foreach ($array_catid as $catid_i) {
         $catid_i = (int) $catid_i;
@@ -253,17 +254,15 @@ function nv_archive_content_module($id, $listcatid)
 }
 
 /**
- * Lấy nút sửa bài viết
+ * Kiểm tra quyền sửa bài viết
  *
  * @param array $info cần có ít nhất id, và listcatid
- * @return string
+ * @return boolean
  */
-function nv_link_edit_page(array $info)
+function nv_check_edit_page(array $info)
 {
-    global $nv_Lang, $module_name;
-
     if (!isset($info['id']) or !isset($info['listcatid'])) {
-        return '';
+        return false;
     }
     if (defined('NV_SYSTEM') and !defined('NV_IS_ADMIN_MODULE')) {
         global $admin_permissions;
@@ -272,41 +271,34 @@ function nv_link_edit_page(array $info)
 
         // Kiểm tra quyền sửa bài
         if (count(array_intersect($listcatid, $admin_permissions['edit_content'] ?? [])) == 0) {
-            return '';
+            return false;
         }
     }
-
-    $link = '<a class="btn btn-primary btn-xs btn_edit" href="' . NV_BASE_ADMINURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&amp;' . NV_NAME_VARIABLE . '=' . $module_name . '&amp;' . NV_OP_VARIABLE . '=content&amp;id=' . $info['id'] . '"><i class="fa fa-edit fa-fw"></i> ' . $nv_Lang->getGlobal('edit') . '</a>';
-    return $link;
+    return true;
 }
 
 /**
- * Lấy nút xóa bài viết
+ * Kiểm tra quyền xóa bài viết
  *
- * @param array $info cần có ít nhất id, và listcatid
- * @param int $detail
- * @return string
+ * @param array $info
+ * @return bool
  */
-function nv_link_delete_page(array $info, int $detail = 0)
+function nv_check_delete_page(array $info)
 {
-    global $nv_Lang;
-
     if (!isset($info['id']) or !isset($info['listcatid'])) {
-        return '';
+        return false;
     }
     if (defined('NV_SYSTEM') and !defined('NV_IS_ADMIN_MODULE')) {
         global $admin_permissions;
 
         $listcatid = is_array($info['listcatid']) ? $info['listcatid'] : array_filter(array_map('intval', explode(',', $info['listcatid'])));
 
-        // Kiểm tra quyền sửa bài
+        // Kiểm tra quyền xóa bài
         if (count(array_intersect($listcatid, $admin_permissions['del_content'] ?? [])) == 0) {
-            return '';
+            return false;
         }
     }
-
-    $link = '<a class="btn btn-danger btn-xs" href="#" data-toggle="nv_del_content" data-id="' . $info['id'] . '" data-checkss="' . md5($info['id'] . NV_CHECK_SESSION) . '" data-adminurl="' . NV_BASE_ADMINURL . '" data-detail="' . $detail . '"><em class="fa fa-trash-o margin-right"></em> ' . $nv_Lang->getGlobal('delete') . '</a>';
-    return $link;
+    return true;
 }
 
 /**
@@ -359,36 +351,32 @@ function my_author_detail($userid)
 {
     global $db, $module_data;
 
+    $userid = (int) $userid;
     $stmt = $db->prepare('SELECT * FROM ' . NV_PREFIXLANG . '_' . $module_data . '_author WHERE uid = :uid');
-    $stmt->bindValue(':uid', (int) $userid, PDO::PARAM_INT);
+    $stmt->bindValue(':uid', $userid, PDO::PARAM_INT);
     $stmt->execute();
     $detail = $stmt->fetch();
     $stmt->closeCursor();
 
     if (!$detail) {
         $stmt = $db->prepare('SELECT * FROM ' . NV_USERS_GLOBALTABLE . ' WHERE userid = :userid');
-        $stmt->bindValue(':userid', (int) $userid, PDO::PARAM_INT);
+        $stmt->bindValue(':userid', $userid, PDO::PARAM_INT);
         $stmt->execute();
         $row = $stmt->fetch();
         $stmt->closeCursor();
 
-        $pseudonym = '';
-        if (!empty($row['first_name'])) {
-            $pseudonym .= $row['first_name'];
-            if (!empty($row['last_name'])) {
-                $pseudonym .= ' ' . $row['last_name'];
-            }
-        }
-        if (empty($pseudonym)) {
-            $pseudonym = $row['username'];
+        if (!$row) {
+            return [];
         }
 
+        $pseudonym = nv_show_name_user($row['first_name'], $row['last_name'], $row['username']);
         $alias = get_pseudonym_alias($pseudonym, 0);
         if (!$alias) {
             $alias = change_alias($pseudonym) . '-' . $userid;
         }
 
-        $stmt = $db->prepare("INSERT INTO " . NV_PREFIXLANG . '_' . $module_data . "_author (uid, alias, pseudonym, image, description, add_time) VALUES (" . $userid . ", :alias, :pseudonym, '', '', " . NV_CURRENTTIME . ')');
+        $stmt = $db->prepare("INSERT INTO " . NV_PREFIXLANG . '_' . $module_data . "_author (uid, alias, pseudonym, image, description, add_time) VALUES (:userid, :alias, :pseudonym, '', '', " . NV_CURRENTTIME . ')');
+        $stmt->bindValue(':userid', $userid, PDO::PARAM_INT);
         $stmt->bindValue(':alias', $alias, PDO::PARAM_STR);
         $stmt->bindValue(':pseudonym', $pseudonym, PDO::PARAM_STR);
         $stmt->execute();
@@ -439,9 +427,6 @@ function nv_save_history($post_old, $post_new)
         'allowed_comm',
         'allowed_rating',
         'external_link',
-        'instant_active',
-        'instant_template',
-        'instant_creatauto',
         'titlesite',
         'description',
         'bodyhtml',
@@ -512,16 +497,16 @@ function nv_save_history($post_old, $post_new)
             new_id, historytime, catid, listcatid, topicid, admin_id,
             author, sourceid, publtime, exptime, archive, title, alias,
             hometext, homeimgfile, homeimgalt, inhome, allowed_comm,
-            allowed_rating, external_link, instant_active, instant_template,
-            instant_creatauto, titlesite, description, bodyhtml, voicedata, keywords, sourcetext,
+            allowed_rating, external_link,
+            titlesite, description, bodyhtml, voicedata, keywords, sourcetext,
             files, tags, internal_authors, imgposition, layout_func, copyright,
             allowed_send, allowed_print, allowed_save, auto_nav, group_view, schema_type, changed_fields
         ) VALUES (
             :new_id, :historytime, :catid, :listcatid, :topicid, :admin_id,
             :author, :sourceid, :publtime, :exptime, :archive, :title, :alias,
             :hometext, :homeimgfile, :homeimgalt, :inhome, :allowed_comm,
-            :allowed_rating, :external_link, :instant_active, :instant_template,
-            :instant_creatauto, :titlesite, :description, :bodyhtml, :voicedata, :keywords, :sourcetext,
+            :allowed_rating, :external_link,
+            :titlesite, :description, :bodyhtml, :voicedata, :keywords, :sourcetext,
             :files, :tags, :internal_authors, :imgposition, :layout_func,
             :copyright, :allowed_send, :allowed_print, :allowed_save, :auto_nav, :group_view, :schema_type, :changed_fields
         )';
@@ -546,9 +531,6 @@ function nv_save_history($post_old, $post_new)
         $array_insert['allowed_comm'] = $post_old['allowed_comm'];
         $array_insert['allowed_rating'] = $post_old['allowed_rating'];
         $array_insert['external_link'] = $post_old['external_link'];
-        $array_insert['instant_active'] = $post_old['instant_active'];
-        $array_insert['instant_template'] = $post_old['instant_template'];
-        $array_insert['instant_creatauto'] = $post_old['instant_creatauto'];
         $array_insert['titlesite'] = $post_old['titlesite'];
         $array_insert['description'] = $post_old['description'];
         $array_insert['bodyhtml'] = $post_old['bodyhtml'];
@@ -572,39 +554,6 @@ function nv_save_history($post_old, $post_new)
     }
 
     return $change_fields;
-}
-
-/**
- * get_homeimgfile()
- *
- * @param mixed  $item
- * @param string $imghome_key
- * @param string $imgmobile_key
- */
-function get_homeimgfile(&$item, $imghome_key = 'imghome', $imgmobile_key = 'imgmobile')
-{
-    global $module_upload;
-
-    if ($item['homeimgthumb'] == 1) {
-        //image thumb
-        $item[$imghome_key] = NV_BASE_SITEURL . NV_FILES_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
-        if (file_exists(NV_ROOTDIR . '/' . NV_MOBILE_FILES_DIR . '/' . $module_upload . '/' . $item['homeimgfile'])) {
-            $item[$imgmobile_key] = NV_BASE_SITEURL . NV_MOBILE_FILES_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
-        } else {
-            $item[$imgmobile_key] = NV_BASE_SITEURL . NV_UPLOADS_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
-        }
-    } elseif ($item['homeimgthumb'] == 2) {
-        //image file
-        $item[$imghome_key] = $item[$imgmobile_key] = NV_BASE_SITEURL . NV_UPLOADS_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
-    } elseif ($item['homeimgthumb'] == 3) {
-        //image url
-        $item[$imghome_key] = $item[$imgmobile_key] = $item['homeimgfile'];
-    } elseif (!empty($show_no_image)) {
-        //no image
-        $item[$imghome_key] = $item[$imgmobile_key] = NV_BASE_SITEURL . $show_no_image;
-    } else {
-        $item[$imghome_key] = $item[$imgmobile_key] = '';
-    }
 }
 
 /**
@@ -636,7 +585,7 @@ function get_schema_colpage_items(array $articles): array
         if (!isset($article['id'])) {
             throw new Exception('Article ID is missing for function get_schema_collectionpage');
         }
-        $ids[] = $article['id'];
+        $ids[] = (int) $article['id'];
     }
     $ids = implode(',', $ids);
     if (empty($ids)) {
@@ -654,10 +603,10 @@ function get_schema_colpage_items(array $articles): array
 
     // Lấy tác giả thuộc quyền quản lý của các bài viết này
     $db->sqlreset()
-    ->select('l.id, l.alias, l.pseudonym')
-    ->from(NV_PREFIXLANG . '_' . $module_data . '_authorlist l
+        ->select('l.id, l.alias, l.pseudonym')
+        ->from(NV_PREFIXLANG . '_' . $module_data . '_authorlist l
     LEFT JOIN ' . NV_PREFIXLANG . '_' . $module_data . '_author a ON l.aid=a.id')
-    ->where('l.id IN(' . $ids . ') AND a.active=1');
+        ->where('l.id IN(' . $ids . ') AND a.active=1');
     $result = $db->query($db->sql());
 
     $articles_authors = [];
@@ -745,4 +694,80 @@ function get_schema_colpage_items(array $articles): array
     }
 
     return $schemas;
+}
+
+/**
+ * Bổ sung thêm một số thông tin cần thiết cho chuyên mục khi xem trên frontend
+ *
+ * @param array $cat
+ * @return void
+ */
+function extend_categories(array &$cat): void
+{
+    global $global_array_cat, $module_upload;
+
+    // Xử lý list các chuyên mục con cấp 1
+    $cat['subcats'] = [];
+    if ($cat['numsubcat'] > 0) {
+        $catids = explode(',', $cat['subcatid']);
+        foreach ($catids as $_value) {
+            if (isset($global_array_cat[$_value]) and !empty($global_array_cat[$_value]['status'])) {
+                $cat['subcats'][$_value] = [
+                    'title' => $global_array_cat[$_value]['title'],
+                    'link' => $global_array_cat[$_value]['link'],
+                ];
+            }
+        }
+    }
+
+    // Vị trí block tùy chỉnh
+    $cat['block_arrs'] = empty($cat['ad_block_cat']) ? [] : array_map('intval', explode(',', $cat['ad_block_cat']));
+    $cat['block_top'] = in_array(1, $cat['block_arrs'], true) ? nv_tag2pos_block(nv_get_blcat_tag($cat['catid'], 1)) : '';
+    $cat['block_bottom'] = in_array(2, $cat['block_arrs'], true) ? nv_tag2pos_block(nv_get_blcat_tag($cat['catid'], 2)) : '';
+
+    // Ảnh bìa cho chuyên mục
+    if (!empty($cat['image'])) {
+        $cat['image_thumb'] = NV_BASE_SITEURL . NV_FILES_DIR . '/' . $module_upload . '/' . $cat['image'];
+        $cat['image'] = NV_BASE_SITEURL . NV_UPLOADS_DIR . '/' . $module_upload . '/' . $cat['image'];
+    }
+}
+
+/**
+ * Bổ sung thêm một số thông tin cho bài viết để xem trên frontend
+ *
+ * @param mixed  $item
+ * @return void
+ */
+function extend_articles(array &$item): void
+{
+    global $module_upload, $module_config, $module_name;
+
+    // Ảnh nhỏ cho bài đăng desktop, mobile
+    $item['imghome'] = $item['imgmobile'] = '';
+    if ($item['homeimgthumb'] == 1) {
+        //image thumb
+        $item['imghome'] = NV_BASE_SITEURL . NV_FILES_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
+        if (file_exists(NV_ROOTDIR . '/' . NV_MOBILE_FILES_DIR . '/' . $module_upload . '/' . $item['homeimgfile'])) {
+            $item['imgmobile'] = NV_BASE_SITEURL . NV_MOBILE_FILES_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
+        } else {
+            $item['imgmobile'] = NV_BASE_SITEURL . NV_UPLOADS_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
+        }
+    } elseif ($item['homeimgthumb'] == 2) {
+        //image file
+        $item['imghome'] = $item['imgmobile'] = NV_BASE_SITEURL . NV_UPLOADS_DIR . '/' . $module_upload . '/' . $item['homeimgfile'];
+    } elseif ($item['homeimgthumb'] == 3) {
+        //image url
+        $item['imghome'] = $item['imgmobile'] = $item['homeimgfile'];
+    } elseif (!empty($show_no_image)) {
+        //no image
+        $item['imghome'] = $item['imgmobile'] = NV_BASE_SITEURL . $show_no_image;
+    } else {
+        $item['imghome'] = $item['imgmobile'] = '';
+    }
+
+    // Cắt ngắn mô tả ngắn gọn theo cấu hình
+    $item['hometext_clean'] = '';
+    if (isset($item['hometext'])) {
+        $item['hometext_clean'] = nv_clean60(strip_tags($item['hometext']), $module_config[$module_name]['tooltip_length'], true);
+    }
 }

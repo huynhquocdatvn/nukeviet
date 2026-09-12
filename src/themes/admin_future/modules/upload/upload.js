@@ -185,7 +185,7 @@ var nukeviet = nukeviet || {};
             trigger: 'auto', // auto|manual auto là tự động gắn sự kiện click vào element, manual là gọi hàm show() để mở
             area: '', // ID thẻ đổ src về khi pick.
             alt: '', // ID thẻ đổ alt về khi pick.
-            checkss: '{$CHECKSS}', // Token CSRF
+            checkss: document.body.dataset.uploadCheckss, // Token CSRF
             onSelect: null // Hàm trả về khi select
         }, options);
 
@@ -679,10 +679,19 @@ var nukeviet = nukeviet || {};
                 },
                 Error: (up, err) => {
                     self.debug && console.log('Plupload Error', up, err);
-                    const msg = '[' + err.code + '] ' + err.status + ': ' + err.message;
+                    let msg;
+                    if (typeof err.status != 'undefined') {
+                        msg = '[' + err.code + '] ' + err.status + ': ' + err.message
+                    } else {
+                        msg = '[' + err.code + '] ' + err.message
+                    }
+                    const queue = $('[data-toggle="queue-items"]', self.fms);
                     if (err.file) {
-                        self.upStatusFile(err.file, null, msg);
-                        return;
+                        const fi = $('#' + err.file.id, queue);
+                        if (fi.length == 1) {
+                            self.upStatusFile(err.file, null, msg);
+                            return;
+                        }
                     }
                     nvToast(msg, 'error');
                 },
@@ -1547,7 +1556,7 @@ var nukeviet = nukeviet || {};
         self.showLoader();
 
         let pr = {
-            checkss: '{$CHECKSS}',
+            checkss: document.body.dataset.uploadCheckss,
             show_file: file ? 1 : 0,
             show_folder: tree ? 1 : 0,
             path: self.settings.path,

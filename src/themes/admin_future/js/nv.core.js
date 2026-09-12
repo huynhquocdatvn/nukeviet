@@ -68,7 +68,7 @@ $(function() {
             type: 'POST',
             url: script_name + '?' + nv_lang_variable + '=' + nv_lang_data + '&' + nv_name_variable + '=siteinfo&nocache=' + new Date().getTime(),
             data: {
-                store_theme_config: $('body').data('checksess'),
+                store_theme_config: $('body').data('config-checkss'),
                 config_name: configName,
                 config_value: configValue
             },
@@ -738,7 +738,7 @@ $(function() {
                         } else {
                             eleCtn = that;
                         }
-                        let ele = $('[name^=' + a.input + ']', eleCtn);
+                        let ele = $('[name^="' + String(a.input).replace(/(["\\])/g, '\\$1') + '"]', eleCtn);
                         if (ele.length) {
                             let pr = ele.parent();
                             if (pr.is('.input-group')) {
@@ -863,6 +863,14 @@ $(function() {
         timerstickyTable = setTimeout(() => {
             stickyTable();
         }, 210);
+    });
+
+    // modalShowByObj
+    $('body').on('click', '[data-toggle=modalShowByObj]', function(e) {
+        e.preventDefault();
+        var obj = $(this).data('obj') ? $(this).data('obj') : this,
+            callback = $(this).data('callback');
+        callback ? modalShowByObj(obj, callback) : modalShowByObj(obj);
     });
 
     // Tooltip

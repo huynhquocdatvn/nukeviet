@@ -12,6 +12,7 @@
 namespace NukeViet\Files;
 
 use GdImage;
+use NukeViet\Core\Ips;
 use NukeViet\Site;
 
 /**
@@ -47,6 +48,11 @@ class Image
     public $is_destroy = false;
     public $is_createWorkingImage = false;
 
+    // Thông tin ghim IP đã kiểm (chống SSRF/DNS rebinding) cho fetch URL
+    private $pin_host = '';
+    private $pin_ip = '';
+    private $pin_port = 0;
+
     const ERROR_IMAGE1 = 'The file is not a known image format';
     const ERROR_IMAGE2 = 'The file is not readable';
     const ERROR_IMAGE3 = 'File is not supplied or is not a file';
@@ -63,9 +69,13 @@ class Image
      */
     public function __construct($filename, $gmaxX = 0, $gmaxY = 0)
     {
-        if (preg_match('/(http|https|ftp):\/\//i', $filename)) {
+        if (preg_match('/^(http|https|ftp):\/\//i', $filename)) {
             $this->is_url = true;
-            $this->filename = self::set_tempnam($filename);
+            if (!$this->is_safe_url_target($filename)) {
+                $this->error = 'URL target is not allowed';
+                return;
+            }
+            $this->filename = $this->set_tempnam($filename);
         } else {
             $this->filename = $filename;
         }
@@ -88,6 +98,10 @@ class Image
      */
     private static function is_image($img)
     {
+        if (empty($img)) {
+            return [];
+        }
+
         $typeflag = [];
         $typeflag[1] = [
             'type' => IMAGETYPE_GIF,
@@ -162,6 +176,9 @@ class Image
         $imageinfo = [];
         $file = @getimagesize($img);
         if ($file) {
+            if (!isset($typeflag[$file[2]])) {
+                return []; // type không được hỗ trợ, trả về rỗng
+            }
             $imageinfo['src'] = $img;
             $imageinfo['width'] = $file[0];
             $imageinfo['height'] = $file[1];
@@ -189,10 +206,15 @@ class Image
         $memoryHave = Site::function_exists('memory_get_usage') ? @memory_get_usage() : 0;
 
         $memoryLimitMB = (int) ini_get('memory_limit');
+        if ($memoryLimitMB < 0) {
+            return;
+        }
+
         $memoryLimit = $memoryLimitMB * $mb;
+
         if ($memoryHave + $memoryNeeded > $memoryLimit) {
             $newLimit = $memoryLimitMB + ceil(($memoryHave + $memoryNeeded - $memoryLimit) / $mb);
-            if (Site::function_exists('memory_limit')) {
+            if (Site::function_exists('ini_set')) {
                 ini_set('memory_limit', $newLimit . 'M');
             }
         }
@@ -231,18 +253,120 @@ class Image
      * @param string $filename
      * @return false|string
      */
-    private static function set_tempnam($filename)
+    private function set_tempnam($filename)
     {
-        $tmpfname = tempnam(NV_ROOTDIR . '/tmp', 'tmp');
-        $input = fopen($filename, 'rb');
-        $output = fopen($tmpfname, 'wb');
-        while ($data = fread($input, 1024)) {
-            fwrite($output, $data);
+        // Bắt buộc phải có curl
+        if (!Site::function_exists('curl_init') or !Site::function_exists('curl_exec')) {
+            return false;
         }
+        // Bắt buộc phải xác minh host và trích xuất IP đã ghim để chống DNS rebinding
+        if (empty($this->pin_ip)) {
+            return false;
+        }
+
+        $tmpfname = tempnam(NV_ROOTDIR . '/' . NV_TEMP_DIR, 'tmp');
+        if ($tmpfname === false) {
+            return false;
+        }
+
+        $maxSize = 10 * 1024 * 1024;
+
+        $output = @fopen($tmpfname, 'wb');
+        if ($output === false) {
+            @unlink($tmpfname);
+            return false;
+        }
+
+        $written = 0;
+        $overflow = false;
+
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $filename);
+
+        // Không follow redirect để tránh SSRF qua chuyển hướng tới host nội bộ
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+
+        curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+
+        // Ghim host vào IP đã xác minh để chống DNS rebinding
+        curl_setopt($ch, CURLOPT_RESOLVE, [
+            $this->pin_host . ':' . $this->pin_port . ':' . $this->pin_ip
+        ]);
+
+        $cainfo = ini_get('curl.cainfo');
+        if (empty($cainfo) and defined('NV_CERTS_DIR') and file_exists(NV_ROOTDIR . '/' . NV_CERTS_DIR . '/cacert.pem')) {
+            $cainfo = NV_ROOTDIR . '/' . NV_CERTS_DIR . '/cacert.pem';
+        }
+        if (!empty($cainfo)) {
+            curl_setopt($ch, CURLOPT_CAINFO, $cainfo);
+        }
+        curl_setopt($ch, CURLOPT_WRITEFUNCTION, function ($ch, $data) use ($output, &$written, &$overflow, $maxSize) {
+            $len = strlen($data);
+            $written += $len;
+            if ($written > $maxSize) {
+                $overflow = true;
+
+                return -1; // hủy tải khi vượt quá giới hạn
+            }
+
+            return fwrite($output, $data);
+        });
+
+        $ok = curl_exec($ch);
+        unset($ch);
         fclose($output);
-        fclose($input);
+
+        if ($ok === false or $overflow or $written === 0) {
+            @unlink($tmpfname);
+            return false;
+        }
 
         return $tmpfname;
+    }
+
+    /**
+     * Chặn SSRF bằng cách cho phép các scheme và từ chối các dải IP riêng/dành riêng.
+     *
+     * @param string $url
+     * @return bool
+     */
+    private function is_safe_url_target($url)
+    {
+        $parts = parse_url($url);
+
+        if (!isset($parts['scheme']) || !in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
+            return false;
+        }
+
+        if (!isset($parts['host'])) {
+            return false;
+        }
+
+        $host = strtolower($parts['host']);
+
+        // Chặn CRLF trong host
+        if (strpbrk($host, "\r\n") !== false) {
+            return false;
+        }
+
+        /*
+         * Resolve tất cả bản ghi A và AAAA rồi yêu cầu mọi IP đều nằm ngoài dải
+         * nội bộ/dành riêng, lấy IP đã kiểm để ghim kết nối chống DNS rebinding.
+         */
+        $pin = null;
+        if (!Ips::is_safe_host($host, $pin, defined('NV_DEVELOPER_MODE'))) {
+            return false;
+        }
+
+        $this->pin_host = $host;
+        $this->pin_ip = (string) $pin;
+        $this->pin_port = isset($parts['port']) ? (int) $parts['port'] : (strtolower($parts['scheme']) === 'https' ? 443 : 80);
+
+        return true;
     }
 
     /**
@@ -300,18 +424,68 @@ class Image
             return false;
         }
 
-        // 1 : Chargement des ent�tes FICHIER
+        // 1: Load FILE header
         $FILE = unpack('vfile_type/Vfile_size/Vreserved/Vbitmap_offset', fread($f1, 14));
         if ($FILE['file_type'] != 19778) {
             return false;
         }
 
-        // 2 : Chargement des ent�tes BMP
+        // 2: Load BMP header
         $BMP = unpack('Vheader_size/Vwidth/Vheight/vplanes/vbits_per_pixel' . '/Vcompression/Vsize_bitmap/Vhoriz_resolution' . '/Vvert_resolution/Vcolors_used/Vcolors_important', fread($f1, 40));
+
+        // Validate trước khi cấp phát bộ nhớ
+        $MAX_DIMENSION = 10000;
+        $MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
+        if ($BMP['width'] <= 0 || $BMP['height'] <= 0) {
+            fclose($f1);
+            return false;
+        }
+
+        if ($BMP['width'] > $MAX_DIMENSION || $BMP['height'] > $MAX_DIMENSION) {
+            fclose($f1);
+            return false;
+        }
+
+        // Kiểm tra bits_per_pixel hợp lệ
+        $allowed_bpp = [1, 4, 8, 16, 24];
+        if (!in_array($BMP['bits_per_pixel'], $allowed_bpp, true)) {
+            fclose($f1);
+            return false;
+        }
+
+        // Kiểm tra compression — chỉ chấp nhận BI_RGB (0) và BI_BITFIELDS (3)
+        // BI_RLE8 (1) và BI_RLE4 (2) không được hỗ trợ trong code hiện tại
+        if (!in_array($BMP['compression'], [0, 3], true)) {
+            fclose($f1);
+            return false;
+        }
+
         $BMP['colors'] = pow(2, $BMP['bits_per_pixel']);
 
         if ($BMP['size_bitmap'] == 0) {
             $BMP['size_bitmap'] = $FILE['file_size'] - $FILE['bitmap_offset'];
+        }
+
+        // Kiểm tra size_bitmap hợp lệ và không vượt giới hạn
+        if ($BMP['size_bitmap'] <= 0 || $BMP['size_bitmap'] > $MAX_FILE_SIZE) {
+            fclose($f1);
+            return false;
+        }
+
+        // Kiểm tra bitmap_offset hợp lệ (không vượt quá file_size)
+        if ($FILE['bitmap_offset'] >= $FILE['file_size']) {
+            fclose($f1);
+            return false;
+        }
+
+        // Ước tính bộ nhớ cần dùng: width * height * 4 bytes (RGBA)
+        // Nhân thêm hệ số 2 để dự phòng GD internal overhead
+        $estimated_memory = $BMP['width'] * $BMP['height'] * 4 * 2;
+        $available_memory = (int) ini_get('memory_limit') * 1024 * 1024 - memory_get_usage();
+        if ($estimated_memory > $available_memory) {
+            fclose($f1);
+            return false;
         }
 
         $BMP['bytes_per_pixel'] = $BMP['bits_per_pixel'] / 8;
@@ -324,17 +498,25 @@ class Image
             $BMP['decal'] = 0;
         }
 
-        // 3 : Chargement des couleurs de la palette
+       // 3: Load palette
+
+        // Giới hạn màu dựa theo bits_per_pixel thực tế:  2, 16, 256
+        $maxColors = ($BMP['bits_per_pixel'] <= 8)    ? pow(2, $BMP['bits_per_pixel'])  : 0;
+
         $PALETTE = [];
-        if ($BMP['colors'] < 16777216) {
+        if ($maxColors > 0 && $BMP['colors'] <= $maxColors) {
             $PALETTE = unpack('V' . $BMP['colors'], fread($f1, $BMP['colors'] * 4));
         }
 
-        // 4 : Cr�ation de l'image
+        // 4: Tạo ảnh
         $IMG = fread($f1, $BMP['size_bitmap']);
         $VIDE = chr(0);
 
         $res = imagecreatetruecolor($BMP['width'], $BMP['height']);
+        if ($res === false) {
+            fclose($f1);
+            return false;
+        }
         $P = 0;
         $Y = $BMP['height'] - 1;
         while ($Y >= 0) {
@@ -650,22 +832,29 @@ class Image
                 $this->get_createImage();
             }
 
+            $imgW = (int) $this->create_Image_info['width'];
+            $imgH = (int) $this->create_Image_info['height'];
+
             $leftX = (int) $leftX;
             $leftY = (int) $leftY;
             $newwidth = (int) $newwidth;
             $newheight = (int) $newheight;
-            if ($leftX < 0 or $leftX >= $this->create_Image_info['width']) {
-                $leftX = 0;
-            }
-            if ($leftY < 0 or $leftY >= $this->create_Image_info['height']) {
-                $leftY = 0;
-            }
-            if ($newwidth <= 0 or ($newwidth + $leftX > $this->create_Image_info['width'])) {
-                $newwidth = $this->create_Image_info['width'] - $leftX;
-            }
-            if ($newheight <= 0 or ($newheight + $leftY > $this->create_Image_info['height'])) {
-                $newheight = $this->create_Image_info['height'] - $leftY;
-            }
+
+            // Gốc cắt phải nằm trong ảnh
+            $leftX = max(0, min($leftX, $imgW - 1));
+            $leftY = max(0, min($leftY, $imgH - 1));
+
+            // Kích thước <= 0 nghĩa là lấy hết phần còn lại tính từ gốc
+            $newwidth = $newwidth <= 0 ? $imgW - $leftX : min($newwidth, $imgW);
+            $newheight = $newheight <= 0 ? $imgH - $leftY : min($newheight, $imgH);
+
+            /*
+             * Khung tràn mép thì giữ nguyên kích thước khung và trượt gốc vào
+             * trong, không co khung. Co khung làm mất tỉ lệ vùng cắt nên ảnh
+             * đích bị méo sau khi resize.
+             */
+            $leftX = min($leftX, $imgW - $newwidth);
+            $leftY = min($leftY, $imgH - $newheight);
             if ($newwidth != $this->create_Image_info['width'] or $newheight != $this->create_Image_info['height']) {
                 $workingImage = Site::function_exists('ImageCreateTrueColor') ? imagecreatetruecolor($newwidth, $newheight) : imagecreate($newwidth, $newheight);
                 if ($workingImage != false) {
@@ -697,6 +886,99 @@ class Image
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Cắt một vùng của ảnh rồi thu/phóng thẳng về kích thước đích trong cùng
+     * một lần lấy mẫu. Dùng thay cho cropFromLeft() + resizeXY() để ảnh đích
+     * không bị resample hai lần và không phải cấp phát canvas trung gian to
+     * bằng vùng cắt. Kích thước đích lấy đúng như truyền vào, không tự giữ
+     * tỉ lệ - phía gọi chịu trách nhiệm truyền cho khớp tỉ lệ vùng cắt.
+     *
+     * @param int $srcX
+     * @param int $srcY
+     * @param int $srcW
+     * @param int $srcH
+     * @param int $dstW
+     * @param int $dstH
+     */
+    public function cropResize($srcX, $srcY, $srcW, $srcH, $dstW = 0, $dstH = 0)
+    {
+        if (!empty($this->error)) {
+            return;
+        }
+        if ($this->is_destroy) {
+            $this->get_createImage();
+        }
+
+        $imgW = (int) $this->create_Image_info['width'];
+        $imgH = (int) $this->create_Image_info['height'];
+
+        $srcX = (int) $srcX;
+        $srcY = (int) $srcY;
+        $srcW = (int) $srcW;
+        $srcH = (int) $srcH;
+        $dstW = (int) $dstW;
+        $dstH = (int) $dstH;
+
+        // Kẹp vùng nguồn theo cùng quy tắc với cropFromLeft()
+        $srcX = max(0, min($srcX, $imgW - 1));
+        $srcY = max(0, min($srcY, $imgH - 1));
+        $srcW = $srcW <= 0 ? $imgW - $srcX : min($srcW, $imgW);
+        $srcH = $srcH <= 0 ? $imgH - $srcY : min($srcH, $imgH);
+        $srcX = min($srcX, $imgW - $srcW);
+        $srcY = min($srcY, $imgH - $srcH);
+
+        // Không truyền kích thước đích thì giữ nguyên cỡ vùng cắt
+        $dstW <= 0 && $dstW = $srcW;
+        $dstH <= 0 && $dstH = $srcH;
+
+        // Tôn trọng giới hạn chung của đối tượng, thu cả hai chiều để giữ tỉ lệ
+        if ($this->gmaxX > 0 and $dstW > $this->gmaxX) {
+            $dstH = max(1, (int) round($dstH * $this->gmaxX / $dstW));
+            $dstW = $this->gmaxX;
+        }
+        if ($this->gmaxY > 0 and $dstH > $this->gmaxY) {
+            $dstW = max(1, (int) round($dstW * $this->gmaxY / $dstH));
+            $dstH = $this->gmaxY;
+        }
+
+        if ($srcX == 0 and $srcY == 0 and $srcW == $imgW and $srcH == $imgH and $dstW == $imgW and $dstH == $imgH) {
+            return; // Không có gì để làm
+        }
+
+        $workingImage = Site::function_exists('ImageCreateTrueColor') ? imagecreatetruecolor($dstW, $dstH) : imagecreate($dstW, $dstH);
+        if ($workingImage == false) {
+            return;
+        }
+
+        $this->is_createWorkingImage = true;
+        self::set_memory_limit($this->fileinfo);
+
+        $transparent_index = imagecolortransparent($this->createImage);
+        $color_count = imagecolorstotal($this->createImage);
+        if ($transparent_index >= 0 and $color_count > 0) {
+            $t_c = imagecolorsforindex($this->createImage, min($transparent_index, $color_count - 1));
+            $transparent_index = imagecolorallocate($workingImage, $t_c['red'], $t_c['green'], $t_c['blue']);
+            if (false !== $transparent_index and imagefill($workingImage, 0, 0, $transparent_index)) {
+                imagecolortransparent($workingImage, $transparent_index);
+            }
+        }
+
+        if ($this->fileinfo['type'] == IMAGETYPE_PNG or (defined('IMAGETYPE_WEBP') and $this->fileinfo['type'] == IMAGETYPE_WEBP)) {
+            if (imagealphablending($workingImage, false)) {
+                $transparency = imagecolorallocatealpha($workingImage, 0, 0, 0, 127);
+                if (false !== $transparency and imagefill($workingImage, 0, 0, $transparency)) {
+                    imagesavealpha($workingImage, true);
+                }
+            }
+        }
+
+        if (imagecopyresampled($workingImage, $this->createImage, 0, 0, $srcX, $srcY, $dstW, $dstH, $srcW, $srcH)) {
+            $this->createImage = $workingImage;
+            $this->create_Image_info['width'] = $dstW;
+            $this->create_Image_info['height'] = $dstH;
         }
     }
 
@@ -834,9 +1116,32 @@ class Image
             if ($string != '') {
                 self::set_memory_limit($this->fileinfo);
 
-                if ($font == '') {
-                    $font = NV_ROOTDIR . '/includes/fonts/Pixelation.ttf';
+                $defaultFont = NV_ROOTDIR . '/includes/fonts/Pixelation.ttf';
+                if (empty($font)) {
+                    $font = $defaultFont;
+                } else {
+                    // Resolve đường dẫn thực tế, loại bỏ ../ và symlink
+                    $realFont = realpath($font);
+
+                    // Phải nằm trong thư mục fonts của project
+                    $allowedFontDir = realpath(NV_ROOTDIR . '/includes/fonts');
+
+                    if (
+                        $realFont === false                              // file không tồn tại
+                        || $allowedFontDir === false                     // thư mục fonts không tồn tại
+                        || !str_starts_with($realFont, $allowedFontDir . DIRECTORY_SEPARATOR) // nằm ngoài thư mục fonts
+                        || !in_array(strtolower(pathinfo($realFont, PATHINFO_EXTENSION)), ['ttf', 'otf'], true) // không phải font file
+                        || !is_readable($realFont)                       // không đọc được
+                    ) {
+                        // Fallback về font mặc định thay vì báo lỗi
+                        // để không làm gián đoạn luồng xử lý ảnh
+                        $font = $defaultFont;
+                    } else {
+                        $font = $realFont;
+                    }
                 }
+
+
                 $bbox = imagettfbbox($fsize, 0, $font, $string);
                 $string_width = $bbox[2] - $bbox[0];
                 $string_height = $bbox[1] - $bbox[7];
@@ -885,43 +1190,52 @@ class Image
                 $this->get_createImage();
             }
 
+            // Chặn SSRF nếu $logo là URL
+            if (preg_match('/^(http|https|ftp):\\/\\//i', $logo)) {
+                if (!$this->is_safe_url_target($logo)) {
+                    return;
+                }
+                // Tải về file tạm, dùng file tạm thay vì URL trực tiếp
+                $logo = $this->set_tempnam($logo);
+                if ($logo === false) {
+                    return;
+                }
+                $is_temp_logo = true;
+            } else {
+                $is_temp_logo = false;
+            }
+
             $logo_info = self::is_image($logo);
             $image_types = [IMAGETYPE_GIF, IMAGETYPE_JPEG, IMAGETYPE_PNG];
             defined('IMAGETYPE_WEBP') && $image_types[] = IMAGETYPE_WEBP;
-            if ($logo_info != [] and $logo_info['width'] != 0 and $logo_info['height'] != 0 and in_array($logo_info['type'], $image_types, true) and preg_match("#image\/[x\-]*(jpg|jpeg|pjpeg|gif|png|webp)#is", $logo_info['mime'])) {
+
+            if ($logo_info != [] and $logo_info['width'] != 0 and $logo_info['height'] != 0
+                and in_array($logo_info['type'], $image_types, true)
+                and preg_match("#image\/[x\-]*(jpg|jpeg|pjpeg|gif|png|webp)#is", $logo_info['mime'])
+            ) {
                 self::set_memory_limit($this->fileinfo);
 
                 if (isset($config_logo['w']) and isset($config_logo['h'])) {
-                    $dst_w = $config_logo['w'];
-                    $dst_h = $config_logo['h'];
+                    $dst_w = max(1, (int) $config_logo['w']);
+                    $dst_h = max(1, (int) $config_logo['h']);
                 } else {
                     $dst_w = $logo_info['width'];
                     $dst_h = $logo_info['height'];
                 }
 
                 if (isset($config_logo['x']) and isset($config_logo['y'])) {
-                    $X = $config_logo['x'];
-                    $Y = $config_logo['y'];
+                    $X = max(0, (int) $config_logo['x']);
+                    $Y = max(0, (int) $config_logo['y']);
                 } else {
                     switch ($align) {
-                        case 'left':
-                            $X = 10;
-                            break;
-                        case 'center':
-                            $X = ceil(($this->create_Image_info['width'] - $logo_info['width']) / 2);
-                            break;
-                        default:
-                            $X = $this->create_Image_info['width'] - ($logo_info['width'] + 10);
+                        case 'left':   $X = 10; break;
+                        case 'center': $X = ceil(($this->create_Image_info['width'] - $logo_info['width']) / 2); break;
+                        default:       $X = $this->create_Image_info['width'] - ($logo_info['width'] + 10);
                     }
                     switch ($valign) {
-                        case 'top':
-                            $Y = 10;
-                            break;
-                        case 'middle':
-                            $Y = ceil(($this->create_Image_info['height'] - $logo_info['height']) / 2);
-                            break;
-                        default:
-                            $Y = $this->create_Image_info['height'] - ($logo_info['height'] + 10);
+                        case 'top':    $Y = 10; break;
+                        case 'middle': $Y = ceil(($this->create_Image_info['height'] - $logo_info['height']) / 2); break;
+                        default:       $Y = $this->create_Image_info['height'] - ($logo_info['height'] + 10);
                     }
                 }
 
@@ -950,13 +1264,20 @@ class Image
                     imagecopyresampled($this->createImage, $this->logoimg, $X, $Y, 0, 0, $dst_w, $dst_h, $logo_info['width'], $logo_info['height']);
                 }
             }
+
+            // Xóa file tạm sau khi dùng xong
+            if ($is_temp_logo and file_exists($logo)) {
+                unlink($logo);
+            }
         }
     }
 
     /**
      * rotate()
      *
-     * @param int $direction
+     * Góc tính theo chiều kim đồng hồ để khớp với CSS transform rotate()
+     *
+     * @param float $direction
      */
     public function rotate($direction)
     {
@@ -965,17 +1286,18 @@ class Image
                 $this->get_createImage();
             }
 
-            $direction = (int) $direction;
-            $direction = 360 - $direction % 360;
+            $direction = 360 - fmod((float) $direction, 360);
             if ($direction != 0 and $direction != 360) {
                 self::set_memory_limit($this->fileinfo);
                 $transColor = imagecolorallocatealpha($this->createImage, 255, 255, 255, 127);
                 $workingImage = imagerotate($this->createImage, $direction, $transColor);
-                imagealphablending($workingImage, true);
-                imagesavealpha($workingImage, true);
-                $this->createImage = $workingImage;
-                $this->create_Image_info['width'] = imagesx($this->createImage);
-                $this->create_Image_info['height'] = imagesy($this->createImage);
+                if ($workingImage !== false) {
+                    imagealphablending($workingImage, true);
+                    imagesavealpha($workingImage, true);
+                    $this->createImage = $workingImage;
+                    $this->create_Image_info['width'] = imagesx($this->createImage);
+                    $this->create_Image_info['height'] = imagesy($this->createImage);
+                }
             }
         }
     }
@@ -994,23 +1316,25 @@ class Image
             $newheight = $this->create_Image_info['height'] + ($this->create_Image_info['height'] / 2);
             $newwidth = $this->create_Image_info['width'];
             $workingImage = Site::function_exists('ImageCreateTrueColor') ? imagecreatetruecolor($newwidth, $newheight) : imagecreate($newwidth, $newheight);
-            imagealphablending($workingImage, false);
-            imagesavealpha($workingImage, true);
-            imagecopy($workingImage, $this->createImage, 0, 0, 0, 0, $this->create_Image_info['width'], $this->create_Image_info['height']);
-            $reflection_height = $this->create_Image_info['height'] / 2;
-            $alpha_step = 80 / $reflection_height;
-            for ($y = 1; $y <= $reflection_height; ++$y) {
-                for ($x = 0; $x < $newwidth; ++$x) {
-                    $rgba = imagecolorat($this->createImage, $x, $this->create_Image_info['height'] - $y);
-                    $alpha = ($rgba & 0x7F000000) >> 24;
-                    $alpha = max($alpha, 47 + ($y * $alpha_step));
-                    $rgba = imagecolorsforindex($this->createImage, $rgba);
-                    $rgba = imagecolorallocatealpha($workingImage, $rgba['red'], $rgba['green'], $rgba['blue'], $alpha);
-                    imagesetpixel($workingImage, $x, $this->create_Image_info['height'] + $y - 1, $rgba);
+            if ($workingImage !== false) {
+                imagealphablending($workingImage, false);
+                imagesavealpha($workingImage, true);
+                imagecopy($workingImage, $this->createImage, 0, 0, 0, 0, $this->create_Image_info['width'], $this->create_Image_info['height']);
+                $reflection_height = $this->create_Image_info['height'] / 2;
+                $alpha_step = 80 / $reflection_height;
+                for ($y = 1; $y <= $reflection_height; ++$y) {
+                    for ($x = 0; $x < $newwidth; ++$x) {
+                        $rgba = imagecolorat($this->createImage, $x, $this->create_Image_info['height'] - $y);
+                        $alpha = ($rgba & 0x7F000000) >> 24;
+                        $alpha = max($alpha, 47 + ($y * $alpha_step));
+                        $rgba = imagecolorsforindex($this->createImage, $rgba);
+                        $rgba = imagecolorallocatealpha($workingImage, $rgba['red'], $rgba['green'], $rgba['blue'], $alpha);
+                        imagesetpixel($workingImage, $x, $this->create_Image_info['height'] + $y - 1, $rgba);
+                    }
                 }
+                $this->createImage = $workingImage;
+                $this->create_Image_info['height'] = $newheight;
             }
-            $this->createImage = $workingImage;
-            $this->create_Image_info['height'] = $newheight;
         }
     }
 
@@ -1074,7 +1398,19 @@ class Image
             }
             $ImageData = ob_get_contents();
             $ImageDataLength = ob_get_length();
-            $mime = $this->fileinfo['mime'];
+
+            // Map IMAGETYPE_* → mime string chính xác
+            $mimeMap = [
+                IMAGETYPE_GIF  => 'image/gif',
+                IMAGETYPE_JPEG => 'image/jpeg',
+                IMAGETYPE_PNG  => 'image/png',
+                IMAGETYPE_BMP  => 'image/bmp',
+            ];
+            defined('IMAGETYPE_WEBP') && $mimeMap[IMAGETYPE_WEBP] = 'image/webp';
+
+            // Lấy mime theo type hiện tại, fallback về fileinfo nếu không có trong map
+            $mime = $mimeMap[$this->create_Image_info['type']] ?? $this->create_Image_info['mime'];
+
             $this->close();
             ob_end_clean();
 
@@ -1099,24 +1435,23 @@ class Image
     /**
      * createFilename()
      *
-     * @param mixed  $path
      * @param mixed  $name
      * @param string $ext
      * @return string
      */
     public static function createFilename($name, $ext = '')
     {
+        $name = basename($name); // Fix Path Traversal
         $newname = preg_replace('/^\W+|\W+$/', '', $name);
         $newname = preg_replace('/[ ]+/', '_', $newname);
-        $newname = strtolower(preg_replace('/\W-/', '', $newname));
+        $newname = strtolower(preg_replace('/[^\w\-\.]/', '', $newname)); // Fix logic Regex
 
-        $_array_name = explode('.', $newname);
-        $_ext = end($_array_name);
-        $newname = preg_replace('/.' . array_pop($_array_name) . '$/', '', $newname);
+        $extension = pathinfo($newname, PATHINFO_EXTENSION);
+        $newname = pathinfo($newname, PATHINFO_FILENAME);
 
-        !empty($ext) && $_ext = $ext;
+        !empty($ext) && $extension = $ext;
 
-        return $newname . '.' . $_ext;
+        return $newname . ($extension !== '' ? '.' . $extension : '');
     }
 
     /**
@@ -1134,7 +1469,28 @@ class Image
                 $this->get_createImage();
             }
 
-            if (is_dir($path) and is_writable($path)) {
+            // Resolve đường dẫn thực tế
+            $realPath = realpath($path);
+            if ($realPath === false) {
+                $this->error = 'Invalid path';
+                return;
+            }
+            $realPath = str_replace('\\', '/', $realPath);
+
+            // Chỉ cần đảm bảo path nằm trong NV_ROOTDIR
+            $rootDir = realpath(NV_ROOTDIR);
+            if ($rootDir === false) {
+                $this->error = 'Invalid root path';
+                return;
+            }
+            $rootDir = str_replace('\\', '/', $rootDir);
+
+            if (!str_starts_with($realPath . '/', $rootDir . '/')) {
+                $this->error = 'Path is outside of allowed directory';
+                return;
+            }
+
+            if (is_dir($realPath) and is_writable($realPath)) {
                 if (empty($newname)) {
                     $newname = $this->create_Image_info['width'] . '_' . $this->create_Image_info['height'];
                     if (defined('PATHINFO_FILENAME')) {
@@ -1149,7 +1505,7 @@ class Image
                 }
 
                 $newname = self::createFilename($newname);
-                $newname = $path . '/' . $newname;
+                $newname = $realPath . '/' . $newname;
 
                 empty($newtype) && $newtype = $this->create_Image_info['type'];
 
@@ -1190,19 +1546,34 @@ class Image
      * @param mixed $newFullName
      * @param int   $quality
      */
-    public function webpConvert($newFullName)
+    public function webpConvert($newFullName, $quality = 80)
     {
         if (empty($this->error)) {
             if ($this->is_destroy) {
                 $this->get_createImage();
             }
 
+            // ← THÊM: validate path nằm trong NV_ROOTDIR
+            $realDir = realpath(dirname($newFullName));
+            $rootDir = realpath(NV_ROOTDIR);
+
+            if (
+                $realDir === false || $rootDir === false ||
+                !str_starts_with($realDir . DIRECTORY_SEPARATOR, $rootDir . DIRECTORY_SEPARATOR)
+            ) {
+                $this->error = 'Path is outside of allowed directory';
+                return;
+            }
+
+            $quality = max(0, min(100, (int) $quality));
+
             if ($this->create_Image_info['type'] == IMAGETYPE_PNG) {
                 imagepalettetotruecolor($this->createImage);
                 imagealphablending($this->createImage, true);
                 imagesavealpha($this->createImage, true);
             }
-            imagewebp($this->createImage, $newFullName);
+
+            imagewebp($this->createImage, $newFullName, $quality);
             $this->Destroy();
         }
     }

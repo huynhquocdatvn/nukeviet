@@ -50,7 +50,7 @@ if ($num_items) {
             'name' => ($row['c_val'] != 'ZZ' and isset($countries[$row['c_val']])) ? ($nv_Lang->existsGlobal('country_' . $row['c_val']) ? $nv_Lang->getGlobal('country_' . $row['c_val']) : $countries[$row['c_val']][1]) : $nv_Lang->getGlobal('unknown'),
             'count' => $row['c_count'],
             'count_format' => !empty($row['c_count']) ? nv_number_format($row['c_count']) : 0,
-            'last_visit' => !empty($row['last_update']) ? nv_datetime_format($row['last_update'], 0, 0) : '',
+            'last_visit' => !empty($row['last_update']) ? nv_datetime_format($row['last_update'], 0, 1) : '',
             'proc' => ceil(($row['c_count'] / $max) * 100)
         ];
     }
@@ -65,7 +65,7 @@ if ($num_items) {
     $contents = nv_theme_statistics_allcountries($countries_list, $generate_page);
 }
 
-$canonicalUrl = getCanonicalUrl($page_url);
+!defined('NV_ADMIN') && $canonicalUrl = getCanonicalUrl($page_url);
 
 include NV_ROOTDIR . '/includes/header.php';
 echo nv_site_theme($contents);

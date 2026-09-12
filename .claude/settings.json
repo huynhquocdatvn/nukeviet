@@ -3,7 +3,11 @@
     "allow": [
       "Bash(php -l *)",
       "Bash(php vendor/bin/codecept *)",
-      "Bash(composer *)"
+      "Bash(composer *)",
+      "Bash(rm -rf src/data/cache/*)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": []
   }
 }

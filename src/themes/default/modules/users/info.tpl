@@ -167,8 +167,22 @@
                 <img id="myavatar" alt="My Avatar" class="img-thumbnail bg-gainsboro" src="{DATA.photo}" width="{DATA.photoWidth}" height="{DATA.photoHeight}" data-default="{AVATAR_DEFAULT}" />
             </div>
             <div>
-                <button type="button" class="btn btn-primary btn-xs margin-right-sm" data-toggle="changeAvatar" data-url="{URL_AVATAR}">{LANG.change_avatar}</button>
-                <button type="button" class="btn btn-danger btn-xs" id="delavatar" data-toggle="deleteAvatar" data-obj="#myavatar" data-ss="{DATA.checkss}"{DATA.imgDisabled}>{GLANG.delete}</button>
+                <button type="button" class="btn btn-primary btn-xs margin-right-sm"
+                    data-toggle="changeAvatar"
+                    data-url="{URL_AVATAR}"
+                    data-action="src"
+                    data-title="{LANG.change_avatar}"
+                    data-callback="changeAvatar"
+                >{LANG.change_avatar}</button>
+                <button type="button" class="btn btn-danger btn-xs" id="delavatar" data-toggle="deleteAvatar" data-obj="#myavatar" data-ss="{DATA.checkss_avatar}"{DATA.imgDisabled}>{GLANG.delete}</button>
+                <!-- BEGIN: direct_trigger -->
+                <script>
+                document.addEventListener('DOMContentLoaded', () => {
+                    const tab = document.querySelector('#edit_avatar');
+                    tab.querySelector('[data-toggle="changeAvatar"]').click();
+                });
+                </script>
+                <!-- END: direct_trigger -->
             </div>
         </div>
         <!-- END: tab_edit_avatar -->
@@ -663,7 +677,8 @@
         <!-- BEGIN: tab_edit_others -->
         <div id="edit_others" class="well-lg tab-pane fade {TAB_OTHERS_ACTIVE}">
             <form action="{EDITINFO_FORM}/others" method="post" role="form" class="form-horizontal" data-toggle="reg_validForm" autocomplete="off" novalidate>
-                <div class="nv-info" style="margin-bottom:30px" data-default="{GLANG.required}">{GLANG.required}</div>
+                <div class="nv-info" style="margin-bottom:30px">{GLANG.required}</div>
+                <div class="nv-info-default hidden">{GLANG.required}</div>
                 <div class="form-detail">
                     <!-- BEGIN: loop -->
                     <!-- BEGIN: textbox -->

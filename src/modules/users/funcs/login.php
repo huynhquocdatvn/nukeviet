@@ -117,7 +117,7 @@ $gfx_chk = (!empty($array_gfx_chk) and in_array('l', $array_gfx_chk, true)) ? 1 
 
 /**
  * @param mixed $array
- * @return never
+ * @return void
  */
 function signin_result($array)
 {
@@ -139,7 +139,7 @@ function signin_result($array)
         }
     }
 
-    $array['redirect'] = $redirect;
+    $array['redirect'] ??= $redirect;
     nv_jsonOutput($array);
 }
 
@@ -199,9 +199,7 @@ function set_reg_attribs($attribs, $username)
     $reg_attribs['first_name'] = '';
     $reg_attribs['last_name'] = '';
     $reg_attribs['gender'] = '';
-    $reg_attribs['photo'] = (!empty($attribs['picture_url']) and empty($attribs['picture_mode'])) ? $attribs['picture_url'] : '';
     $reg_attribs['openid'] = $attribs['id'];
-    $reg_attribs['opid'] = $crypt->hash($attribs['id']);
 
     if (isset($attribs['namePerson/first']) and !empty($attribs['namePerson/first'])) {
         $reg_attribs['first_name'] = $attribs['namePerson/first'];
@@ -218,6 +216,13 @@ function set_reg_attribs($attribs, $username)
     if (isset($attribs['person/gender']) and !empty($attribs['person/gender'])) {
         $reg_attribs['gender'] = $attribs['person/gender'];
     }
+
+    $reg_attribs = array_map('strip_tags', $reg_attribs);
+    $reg_attribs = array_map('nv_htmlspecialchars', $reg_attribs);
+
+    $photo = (!empty($attribs['picture_url']) and empty($attribs['picture_mode'])) ? $attribs['picture_url'] : '';
+    $reg_attribs['photo'] = str_replace(['"', "'", '<', '>'], '', strip_tags($photo));
+    $reg_attribs['opid'] = $crypt->hash($attribs['id']);
 
     if ($global_config['allowuserreg'] == 1 or $global_config['allowuserreg'] == 2) {
         if (!empty($reg_attribs['photo'])) {
@@ -243,7 +248,11 @@ function set_reg_attribs($attribs, $username)
 
                 if ($check[0] == 1) {
                     $reg_attribs['photo'] = NV_UPLOADS_DIR . '/' . $module_upload . '/' . $newname;
+                } else {
+                    $reg_attribs['photo'] = '';
                 }
+            } else {
+                $reg_attribs['photo'] = '';
             }
         }
     }
@@ -332,8 +341,12 @@ function new_openid_user_save($reg_username, $reg_email, $reg_password, $attribs
 
         // Luu vao bang OpenID
         $user_id = (int) ($row['userid']);
-        $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid VALUES (' . $user_id . ', :server, :opid , :id, :email)');
-        $stmt->bindParam(':server', $reg_attribs['server'], PDO::PARAM_STR);
+        $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid (
+            userid, openid, opid, id, email
+        ) VALUES (
+            ' . $user_id . ', :openid, :opid , :id, :email
+        )');
+        $stmt->bindParam(':openid', $reg_attribs['server'], PDO::PARAM_STR);
         $stmt->bindParam(':opid', $reg_attribs['opid'], PDO::PARAM_STR);
         $stmt->bindParam(':id', $reg_attribs['openid'], PDO::PARAM_STR);
         $stmt->bindParam(':email', $reg_attribs['email'], PDO::PARAM_STR);
@@ -348,11 +361,11 @@ function new_openid_user_save($reg_username, $reg_email, $reg_password, $attribs
         $send_data = [[
             'to' => $reg_email,
             'data' => [
-                'first_name' => $data_insert['first_name'],
-                'last_name' => $data_insert['last_name'],
-                'username' => $data_insert['username'],
+                'first_name' => $reg_attribs['first_name'],
+                'last_name' => $reg_attribs['last_name'],
+                'username' => $reg_username,
                 'email' => $reg_email,
-                'gender' => $data_insert['gender'],
+                'gender' => $gender,
                 'link' => urlRewriteWithDomain(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name, NV_MY_DOMAIN),
                 'oauth_name' => ucfirst($reg_attribs['server']),
                 'lang' => NV_LANG_INTERFACE
@@ -557,11 +570,21 @@ if (defined('NV_OPENID_ALLOWED') and $nv_Request->isset_request('server', 'get')
                 ]);
             }
 
+            // Email không tin cậy mà tài khoản không có mật khẩu thì từ chối gắn tự động vào tài khoản
+            $email_untrusted = isset($attribs['email_trusted']) && !$attribs['email_trusted'];
+            if ($email_untrusted and empty($nv_row['password'])) {
+                opidr_login([
+                    'status' => 'error',
+                    'mess' => $nv_Lang->getModule('openid_email_not_trusted')
+                ]);
+            }
+
             /*
-             * Nếu tài khoản trùng email này có mật khẩu và chức năng tự động gán Oauh bị tắt
-             * thì yêu cầu nhập mật khẩu xác nhận
+             * Yêu cầu nhập mật khẩu xác nhận khi:
+             * - Tài khoản có mật khẩu và chức năng tự động gán Oauth bị tắt hoặc
+             * - Email không đáng tin
              */
-            if (!empty($nv_row['password']) and empty($global_users_config['auto_assign_oauthuser'])) {
+            if (!empty($nv_row['password']) and (empty($global_users_config['auto_assign_oauthuser']) or $email_untrusted)) {
                 if ($nv_Request->isset_request('openid_account_confirm', 'post')) {
                     $password = $nv_Request->get_string('password', 'post', '');
 
@@ -617,8 +640,12 @@ if (defined('NV_OPENID_ALLOWED') and $nv_Request->isset_request('server', 'get')
             }
 
             $user_id = (int) $nv_row['userid'];
-            $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid VALUES (' . $user_id . ', :server, :opid, :id, :email )');
-            $stmt->bindParam(':server', $attribs['server'], PDO::PARAM_STR);
+            $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid (
+                userid, openid, opid, id, email
+            ) VALUES (
+                ' . $user_id . ', :openid, :opid, :id, :email
+            )');
+            $stmt->bindParam(':openid', $attribs['server'], PDO::PARAM_STR);
             $stmt->bindParam(':opid', $opid, PDO::PARAM_STR);
             $stmt->bindParam(':id', $attribs['id'], PDO::PARAM_STR);
             $stmt->bindParam(':email', $email, PDO::PARAM_STR);
@@ -727,8 +754,12 @@ if (defined('NV_OPENID_ALLOWED') and $nv_Request->isset_request('server', 'get')
             validUserLog($row, 1);
         }
 
-        $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid VALUES (' . (int) $row['userid'] . ', :server, :opid, :id, :email )');
-        $stmt->bindParam(':server', $attribs['server'], PDO::PARAM_STR);
+        $stmt = $db->prepare('INSERT INTO ' . NV_MOD_TABLE . '_openid (
+            userid, openid, opid, id, email
+        ) VALUES (
+            ' . (int) $row['userid'] . ', :openid, :opid, :id, :email
+        )');
+        $stmt->bindParam(':openid', $attribs['server'], PDO::PARAM_STR);
         $stmt->bindParam(':opid', $opid, PDO::PARAM_STR);
         $stmt->bindParam(':id', $attribs['id'], PDO::PARAM_STR);
         $stmt->bindParam(':email', $email, PDO::PARAM_STR);
@@ -959,7 +990,6 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
 
         signin_result([
             'status' => 'ok',
-            'input' => '',
             'mess' => $nv_Lang->getModule('login_ok')
         ]);
     }
@@ -980,7 +1010,7 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
         ], NV_JSON_ENCODE));
         signin_result([
             'status' => 'activation',
-            'input' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=lostactivelink&autosubmit=1' . (!empty($nv_redirect) ? '&nv_redirect=' . $nv_redirect : ''), true),
+            'redirect' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=lostactivelink&autosubmit=1' . (!empty($nv_redirect) ? '&nv_redirect=' . $nv_redirect : ''), true),
             'mess' => $nv_Lang->getModule('account_waiting_activation')
         ]);
     }
@@ -1022,7 +1052,7 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
             $nv_Request->set_Session('cant_do_2step', $row['userid'] . '.' . NV_CURRENTTIME . '.0.');
             signin_result([
                 'status' => 'remove2step',
-                'input' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=r2s' . (!empty($nv_redirect) ? '&nv_redirect=' . $nv_redirect : ''), true),
+                'redirect' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=r2s' . (!empty($nv_redirect) ? '&nv_redirect=' . $nv_redirect : ''), true),
                 'mess' => $nv_Lang->getGlobal('remove2step_info')
             ]);
         }
@@ -1063,9 +1093,23 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
             ]);
         }
 
+        // Chống brute-force cho bước xác thực 2 bước
+        $tfa_blocker_key = '2fa_uid_' . $row['userid'];
+        if ($global_config['login_number_tracking'] and $blocker->is_blocklogin($tfa_blocker_key)) {
+            signin_result([
+                'status' => 'error',
+                'input' => '',
+                'mess' => $nv_Lang->getGlobal('userlogin_blocked', $global_config['login_number_tracking'], nv_datetime_format($blocker->login_block_end, 1))
+            ]);
+        }
+
         // Nếu mã từ app nhập vào không chính xác
         $GoogleAuthenticator = new \NukeViet\Core\GoogleAuthenticator();
         if (!empty($nv_totppin) and !$GoogleAuthenticator->verifyOpt($row['secretkey'], $nv_totppin)) {
+            // Ghi nhận lần thử sai để giới hạn brute-force mã 2 bước
+            if ($global_config['login_number_tracking']) {
+                $blocker->set_loginFailed($tfa_blocker_key, NV_CURRENTTIME);
+            }
             signin_result([
                 'status' => 'error',
                 'input' => 'nv_totppin',
@@ -1074,23 +1118,27 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
         }
 
         if (!empty($nv_backupcodepin)) {
-            $nv_backupcodepin = nv_strtolower($nv_backupcodepin);
-            $sth = $db->prepare('SELECT code FROM ' . NV_MOD_TABLE . '_backupcodes WHERE is_used=0 AND code=:code AND userid=' . $row['userid']);
-            $sth->bindParam(':code', $nv_backupcodepin, PDO::PARAM_STR);
+            $nv_backupcodepin = $crypt->encryptDeterministic(nv_strtolower($nv_backupcodepin));
+
+            // Cập nhật ngay lượt sử dụng mã dự phòng để tránh bị brute-force
+            $sth = $db->prepare('UPDATE ' . NV_MOD_TABLE . '_backupcodes SET is_used = 1, time_used = :time_used WHERE code = :code AND userid = :userid AND is_used = 0');
+            $sth->bindValue(':time_used', NV_CURRENTTIME, PDO::PARAM_INT);
+            $sth->bindValue(':code', $nv_backupcodepin, PDO::PARAM_STR);
+            $sth->bindValue(':userid', $row['userid'], PDO::PARAM_INT);
             $sth->execute();
 
-            // Nếu không tìm thấy trong CSDL mã dự phòng
+            // Nếu mã dự phòng không hợp lệ hoặc đã được sử dụng
             if ($sth->rowCount() != 1) {
+                // Ghi nhận lần thử sai để giới hạn brute-force mã dự phòng
+                if ($global_config['login_number_tracking']) {
+                    $blocker->set_loginFailed($tfa_blocker_key, NV_CURRENTTIME);
+                }
                 signin_result([
                     'status' => 'error',
                     'input' => 'nv_backupcodepin',
                     'mess' => $nv_Lang->getGlobal('2teplogin_error_backup')
                 ]);
             }
-
-            // Nếu mã dự phòng khớp thì đánh dấu trong CSDL là mã này đã được sử dụng
-            $code = $sth->fetchColumn();
-            $db->query('UPDATE ' . NV_MOD_TABLE . '_backupcodes SET is_used=1, time_used=' . NV_CURRENTTIME . " WHERE code='" . $code . "' AND userid=" . $row['userid']);
         }
 
         // Kiểm tra passkey
@@ -1204,6 +1252,7 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
     }
 
     $blocker->reset_trackLogin($nv_username);
+    $blocker->reset_trackLogin('2fa_uid_' . $row['userid']);
 
     // Xác nhận đăng nhập thành công
     if (defined('SSO_SERVER')) {
@@ -1233,7 +1282,7 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
             }
             signin_result([
                 'status' => '2steprequire',
-                'input' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . NV_2STEP_VERIFICATION_MODULE . '&' . NV_OP_VARIABLE . '=setup&nv_redirect=' . $nv_redirect, true),
+                'redirect' => nv_url_rewrite(NV_BASE_SITEURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . NV_2STEP_VERIFICATION_MODULE . '&' . NV_OP_VARIABLE . '=setup&nv_redirect=' . $nv_redirect, true),
                 'mess' => $nv_Lang->getGlobal('2teplogin_require')
             ]);
         }
@@ -1242,7 +1291,6 @@ if ($nv_Request->isset_request('_csrf, nv_login', 'post')) {
     // Trả kết quả OK
     signin_result([
         'status' => 'ok',
-        'input' => '',
         'mess' => $nv_Lang->getModule('login_ok')
     ]);
 }

@@ -18,7 +18,7 @@ $is_system = $nv_Request->get_int('system', 'get', 0);
 $log_userid = $is_system ? 0 : $admin_info['admin_id'];
 
 if ($js) {
-    nv_insert_logs(NV_LANG_DATA, 'login', '[' . $admin_info['username'] . '] ' . $nv_Lang->getGlobal('admin_logout_title'), ' Client IP:' . NV_CLIENT_IP, $log_userid);
+    nv_insert_logs(NV_LANG_DATA, 'login', '[' . $admin_info['username'] . '] ' . $nv_Lang->getGlobal('admin_logout_title'), '', $log_userid);
     nv_admin_logout();
     if (defined('NV_IS_USER_FORUM') or defined('SSO_SERVER')) {
         !defined('NV_IS_MOD_USER') && define('NV_IS_MOD_USER', true);
@@ -29,7 +29,7 @@ if ($js) {
 
 $ok = $nv_Request->get_int('ok', 'get', 0);
 if ($ok) {
-    nv_insert_logs(NV_LANG_DATA, 'login', '[' . $admin_info['username'] . '] ' . $nv_Lang->getGlobal('admin_logout_title'), ' Client IP:' . NV_CLIENT_IP, $log_userid);
+    nv_insert_logs(NV_LANG_DATA, 'login', '[' . $admin_info['username'] . '] ' . $nv_Lang->getGlobal('admin_logout_title'), '', $log_userid);
     nv_admin_logout();
     $info = $nv_Lang->getGlobal('admin_logout_ok');
     $info .= '<meta http-equiv="Refresh" content="5;URL=' . $global_config['site_url'] . '" />';
@@ -39,6 +39,25 @@ if ($ok) {
     }
 } else {
     $url = ($client_info['referer'] != '') ? $client_info['referer'] : ($_SERVER['SCRIPT_URI'] ?? '');
+
+    // [FIX] Sanitize URL - Chống XSS & Open Redirect
+    if (!empty($url)) {
+        // Chặn javascript:, vbscript:, data: scheme
+        if (preg_match('/^(javascript|vbscript|data):/i', $url)) {
+            $url = NV_BASE_SITEURL;
+        }
+        // Chỉ cho phép URL nội bộ (bắt đầu bằng NV_BASE_SITEURL)
+        // hoặc relative path an toàn (bắt đầu / nhưng KHÔNG phải // để chống protocol-relative bypass)
+        elseif (strpos($url, NV_BASE_SITEURL) !== 0 && !preg_match('#^/[^/]#', $url)) {
+            $url = NV_BASE_SITEURL;
+        }
+    } else {
+        $url = NV_BASE_SITEURL;
+    }
+
+    // Escape HTML để chống XSS trong thuộc tính href
+    $url = nv_htmlspecialchars($url);
+
     $info = $nv_Lang->getGlobal('admin_logout_question') . " ?<br /><br />\n";
     $info .= '<a href="' . NV_BASE_SITEURL . 'index.php?second=admin_logout&amp;ok=1">' . $nv_Lang->getGlobal('ok') . "</a> | \n";
     $info .= '<a href="' . $url . '">' . $nv_Lang->getGlobal('cancel') . "</a>\n";

@@ -33,6 +33,12 @@ class UrlGetContents
     private $password = '';
     private $ref = '';
     private $redirectCount = 0;
+
+    /**
+     * @var bool xác thực SSL khi tải nội dung
+     */
+    private $ssl_verify = true;
+
     public $time_limit = 60;
 
     /**
@@ -50,8 +56,7 @@ class UrlGetContents
             'Mozilla/4.8 [en] (Windows NT 6.0; U)',
             'Opera/9.25 (Windows NT 6.0; U; en)'
         ];
-        $rand = array_rand($userAgents);
-        self::$user_agent = $userAgents[$rand];
+        self::$user_agent = $userAgents[array_rand($userAgents)];
 
         self::$open_basedir = (ini_get('open_basedir') == '1' or strtolower(ini_get('open_basedir')) == 'on') ? true : false;
         $this->time_limit = (int) $time_limit;
@@ -87,6 +92,39 @@ class UrlGetContents
     }
 
     /**
+     * setSslVerify()
+     * Bật hoặc tắt xác thực chứng chỉ SSL.
+     * Mặc định là true (bật). Chỉ tắt khi thực sự cần thiết
+     * (ví dụ: môi trường dev với self-signed cert).
+     *
+     * @param bool $ssl_verify
+     * @return $this
+     */
+    public function setSslVerify(bool $ssl_verify): self
+    {
+        $this->ssl_verify = $ssl_verify;
+
+        return $this;
+    }
+
+    /**
+     * isValidScheme()
+     * Kiểm tra URL có thuộc scheme an toàn (http/https) hay không.
+     * Ngăn chặn SSRF/LFI qua các protocol wrapper nguy hiểm.
+     *
+     * @param array|false $url_info Kết quả từ Http::parse_url()
+     * @return bool
+     */
+    private function isValidScheme($url_info): bool
+    {
+        if (empty($url_info) || empty($url_info['scheme'])) {
+            return false;
+        }
+
+        return in_array(strtolower($url_info['scheme']), ['http', 'https'], true);
+    }
+
+    /**
      * check_url()
      *
      * @param int $is_200
@@ -97,23 +135,13 @@ class UrlGetContents
         $allow_url_fopen = (ini_get('allow_url_fopen') == '1' or strtolower(ini_get('allow_url_fopen')) == 'on') ? 1 : 0;
 
         if (Site::function_exists('get_headers') and $allow_url_fopen == 1) {
-            if (version_compare(PHP_VERSION, '7.1.0', '>=')) {
-                $context = stream_context_create([
-                    'ssl' => [
-                        'verify_peer' => false,
-                        'verify_peer_name' => false,
-                    ],
-                ]);
-                $res = get_headers($this->url_info['uri'], 0, $context);
-            } else {
-                stream_context_set_default([
-                    'ssl' => [
-                        'verify_peer' => false,
-                        'verify_peer_name' => false,
-                    ],
-                ]);
-                $res = get_headers($this->url_info['uri']);
-            }
+            $context = stream_context_create([
+                'ssl' => [
+                    'verify_peer'      => $this->ssl_verify,
+                    'verify_peer_name' => $this->ssl_verify,
+                ],
+            ]);
+            $res = get_headers($this->url_info['uri'], 0, $context);
         } elseif (Site::function_exists('curl_init') and Site::function_exists('curl_exec')) {
             $url_info = parse_url($this->url_info['uri']);
             $port = isset($url_info['port']) ? (int) ($url_info['port']) : 80;
@@ -125,9 +153,7 @@ class UrlGetContents
                 'Mozilla/4.8 [en] (Windows NT 6.0; U)',
                 'Opera/9.25 (Windows NT 6.0; U; en)'
             ];
-            mt_srand(microtime(true) * 1000000);
-            $rand = array_rand($userAgents);
-            $agent = $userAgents[$rand];
+            $agent = $userAgents[array_rand($userAgents)];
 
             $curl = curl_init($this->url_info['uri']);
             curl_setopt($curl, CURLOPT_HEADER, true);
@@ -142,8 +168,8 @@ class UrlGetContents
 
             curl_setopt($curl, CURLOPT_TIMEOUT, 15);
             curl_setopt($curl, CURLOPT_USERAGENT, $agent);
-            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
-            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, $this->ssl_verify ? 2 : false);
+            curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, $this->ssl_verify);
 
             $response = curl_exec($curl);
             unset($curl);
@@ -195,7 +221,7 @@ class UrlGetContents
                         $location = $this->url_info['scheme'] . '://' . $this->url_info['host'] . $location;
                     }
                     $this->url_info = Http::parse_url($location);
-                    if (!$this->url_info) {
+                    if (!$this->url_info || !$this->isValidScheme($this->url_info)) {
                         return false;
                     }
 
@@ -255,6 +281,10 @@ class UrlGetContents
         if (!self::$open_basedir) {
             curl_setopt($curlHandle, CURLOPT_FOLLOWLOCATION, 1);
             curl_setopt($curlHandle, CURLOPT_MAXREDIRS, 10);
+            // Giới hạn cURL chỉ follow redirect sang http/https, ngăn SSRF qua protocol lạ
+            if (defined('CURLOPT_REDIR_PROTOCOLS')) {
+                curl_setopt($curlHandle, CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+            }
         }
 
         curl_setopt($curlHandle, CURLOPT_TIMEOUT, 30);
@@ -286,7 +316,7 @@ class UrlGetContents
 
                     $this->url_info = Http::parse_url($newurl);
 
-                    if (!$this->url_info) {
+                    if (!$this->url_info || !$this->isValidScheme($this->url_info)) {
                         return false;
                     }
 
@@ -309,7 +339,7 @@ class UrlGetContents
 
             $this->url_info = Http::parse_url($newurl);
 
-            if (!$this->url_info) {
+            if (!$this->url_info || !$this->isValidScheme($this->url_info)) {
                 return false;
             }
 
@@ -407,7 +437,7 @@ class UrlGetContents
 
             $this->url_info = Http::parse_url($newurl);
 
-            if (!$this->url_info) {
+            if (!$this->url_info || !$this->isValidScheme($this->url_info)) {
                 return false;
             }
 
@@ -429,7 +459,7 @@ class UrlGetContents
 
             $this->url_info = Http::parse_url($newurl);
 
-            if (!$this->url_info) {
+            if (!$this->url_info || !$this->isValidScheme($this->url_info)) {
                 return false;
             }
 
@@ -520,6 +550,11 @@ class UrlGetContents
         $this->url_info = Http::parse_url($url);
 
         if (!$this->url_info) {
+            return false;
+        }
+
+        // Ngăn chặn LFI/SSRF qua protocol wrapper nguy hiểm (file://, dict://, php://, gopher://...)
+        if (!$this->isValidScheme($this->url_info)) {
             return false;
         }
 

@@ -131,7 +131,7 @@ if ($NV_IS_ADMIN_MODULE and $module_config[$module_name]['order_articles'] and e
     // Sắp xếp bài đăng theo con số tự nhập
     $_weight_new = $nv_Request->get_int('order_articles_new', 'post', 0);
     $_id = $nv_Request->get_int('order_articles_id', 'post', 0);
-    
+
     if ($_id > 0 and $_weight_new > 0) {
         if (!csrf_check($nv_Request->get_title('order_articles_checkss', 'post', ''), $admin_info['admin_id'] . '_' . $module_name . '_' . $_id)) {
             die($nv_Lang->getGlobal('error_checkss'));
@@ -333,7 +333,7 @@ $array_list_action = [
 if (defined('NV_IS_ADMIN_MODULE')) {
     $array_list_action['declined'] = $nv_Lang->getModule('declined');
     $array_list_action['block'] = $nv_Lang->getModule('addtoblock');
-    $array_list_action['topics-add'] = $nv_Lang->getModule('topics-add');
+    $array_list_action['topics-add'] = $nv_Lang->getModule('topics_add');
     $array_list_action['move'] = $nv_Lang->getModule('move');
 } elseif ($check_declined) { // Neu co quyen duyet bai thi
     $array_list_action['declined'] = $nv_Lang->getModule('declined');
@@ -347,7 +347,7 @@ if (!empty($module_config[$module_name]['elas_use'])) {
 
     $search_elastic = [];
     // Tim kiem theo bodytext,author,title
-    $key_elastic_search = nv_EncString($db->dblikeescape($array_search['q']));
+    $key_elastic_search = nv_EncString($array_search['q']);
 
     if ($array_search['stype'] == 'bodytext' or $array_search['stype'] == 'author' or $array_search['stype'] == 'title') {
         if ($array_search['stype'] == 'bodytext') {
@@ -370,8 +370,8 @@ if (!empty($module_config[$module_name]['elas_use'])) {
             // Tim bai viet co internal author trung voi ket qua tim kiem
             $sql = "SELECT id FROM " . NV_PREFIXLANG . "_" . $module_data . "_authorlist WHERE alias LIKE :q_alias OR pseudonym LIKE :q_pseudonym";
             $sth = $db->prepare($sql);
-            $sth->bindValue(':q_alias', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
-            $sth->bindValue(':q_pseudonym', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
+            $sth->bindValue(':q_alias', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
+            $sth->bindValue(':q_pseudonym', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
             $sth->execute();
             $match = [];
             while ($_id_search = $sth->fetch()) {
@@ -409,15 +409,15 @@ if (!empty($module_config[$module_name]['elas_use'])) {
         $search_elastic = [
             'should' => [
                 'match' => [
-                    'sourcetext' => $db->dblikeescape($qurl)
+                    'sourcetext' => $qurl
                 ]
             ]
         ];
     } elseif ($array_search['stype'] == 'admin_id') {
         $sql = "SELECT userid FROM " . NV_USERS_GLOBALTABLE . " WHERE username LIKE :q_username OR first_name LIKE :q_first_name";
         $sth = $db->prepare($sql);
-        $sth->bindValue(':q_username', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
-        $sth->bindValue(':q_first_name', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
+        $sth->bindValue(':q_username', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
+        $sth->bindValue(':q_first_name', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
         $sth->execute();
         $match = [];
         while ($_admin_id_search = $sth->fetch()) {
@@ -439,7 +439,7 @@ if (!empty($module_config[$module_name]['elas_use'])) {
         $search_elastic_user['filter']['or'] = $match;
         $search_elastic = array_merge($search_elastic, $search_elastic_user);
     } else {
-        $key_search = nv_EncString($db->dblikeescape($array_search['q']));
+        $key_search = nv_EncString($array_search['q']);
         $search_elastic = [
             'should' => [
                 'multi_match' => [
@@ -461,8 +461,8 @@ if (!empty($module_config[$module_name]['elas_use'])) {
         // Tim bai viet co internal author trung voi ket qua tim kiem
         $sql = "SELECT id FROM " . NV_PREFIXLANG . "_" . $module_data . "_authorlist WHERE alias LIKE :q_alias OR pseudonym LIKE :q_pseudonym";
         $sth = $db->prepare($sql);
-        $sth->bindValue(':q_alias', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
-        $sth->bindValue(':q_pseudonym', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
+        $sth->bindValue(':q_alias', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
+        $sth->bindValue(':q_pseudonym', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
         $sth->execute();
         $match = [];
         while ($_id_search = $sth->fetch()) {
@@ -480,8 +480,8 @@ if (!empty($module_config[$module_name]['elas_use'])) {
         // tim tat ca cac admin_id c username=$db->dblikeescape($array_search['qhtml']) ho?c first_name=$db->dblikeescape($array_search['qhtml'])
         $sql = "SELECT userid FROM " . NV_USERS_GLOBALTABLE . " WHERE username LIKE :q_username OR first_name LIKE :q_first_name";
         $sth = $db->prepare($sql);
-        $sth->bindValue(':q_username', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
-        $sth->bindValue(':q_first_name', '%' . $db->dblikeescape($array_search['qhtml']) . '%', PDO::PARAM_STR);
+        $sth->bindValue(':q_username', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
+        $sth->bindValue(':q_first_name', '%' . $db->dblikeescape($array_search['qhtml'], true) . '%', PDO::PARAM_STR);
         $sth->execute();
         // search elastic theo admin_id v?a tm dc
         $match = [];
@@ -1193,9 +1193,6 @@ if ($loadhistory) {
         'allowed_comm' => $nv_Lang->getModule('content_allowed_comm'),
         'allowed_rating' => $nv_Lang->getModule('content_allowed_rating'),
         'external_link' => $nv_Lang->getModule('content_external_link1'),
-        'instant_active' => $nv_Lang->getModule('content_insart'),
-        'instant_template' => $nv_Lang->getModule('content_instant_template1'),
-        'instant_creatauto' => $nv_Lang->getModule('content_instant_creatauto'),
         'titlesite' => $nv_Lang->getModule('titlesite'),
         'description' => $nv_Lang->getModule('description'),
         'bodyhtml' => $nv_Lang->getModule('content_bodytext'),
@@ -1248,7 +1245,7 @@ if ($loadhistory) {
             'text' => '',
             'url' => ''
         ];
-        
+
         if (!csrf_check($restorehistory, $admin_info['admin_id'] . '_' . $module_name . '_' . $loadhistory_id)) {
             $respon['text'] = $nv_Lang->getGlobal('error_checkss');
             nv_jsonOutput($respon);
@@ -1328,7 +1325,7 @@ if ($loadhistory) {
 
         // Đẩy qua trang content để sử dụng lại cái form đó cho chuẩn
         $respon['success'] = true;
-        $respon['url'] = NV_BASE_ADMINURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=content&id=' . $loadhistory_id . '&restore=' . $history_id . '&restorehash=' . md5($csrf_key . $admin_info['admin_id'] . $loadhistory_id . $history_id . $post_new['historytime']);
+        $respon['url'] = NV_BASE_ADMINURL . 'index.php?' . NV_LANG_VARIABLE . '=' . NV_LANG_DATA . '&' . NV_NAME_VARIABLE . '=' . $module_name . '&' . NV_OP_VARIABLE . '=content&id=' . $loadhistory_id . '&restore=' . $history_id . '&restorehash=' . csrf_create(get_article_restore_csrf_key($loadhistory_id, $history_id, $post_new['historytime']));
         nv_jsonOutput($respon);
     }
 
@@ -1528,6 +1525,9 @@ if (!$is_search) {
     }
 }
 $tpl->assign('DRAFTS', $array_drafts);
+$tpl->assign('DRAFTS_CHECKSS', csrf_create($admin_info['admin_id'] . '_' . $module_name . '_drafts'));
+$tpl->assign('DELETE_LIST_CHECKSS', csrf_create($admin_info['admin_id'] . '_' . $module_name . '_content-del'));
+$tpl->assign('ACTION_CHECKSS', csrf_create($admin_info['admin_id'] . '_' . $module_name . '_action'));
 $tpl->assign('ARRAY_OTHERS', $array_others);
 $tpl->assign('ARRAY_OTHERS_COUNT', $array_others_count);
 
